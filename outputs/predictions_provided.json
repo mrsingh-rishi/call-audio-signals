@@ -11,8 +11,8 @@
     "confidence": 0.9
   },
   "call_002.ogg": {
-    "emotional_tone": "neutral",
-    "emotional_intensity": "low",
+    "emotional_tone": "upset",
+    "emotional_intensity": "high",
     "background_noise_present": false,
     "background_noise_type": "",
     "background_noise_severity": "none",

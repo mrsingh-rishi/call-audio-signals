@@ -41,21 +41,21 @@ MIME = {
     ".flac": "audio/flac", ".aac": "audio/aac", ".webm": "audio/webm",
 }
 
-# The delivery-over-content instruction is not generic prompt padding. Measured
-# on the provided calls, two of three ground-truth labels invert lexical
-# sentiment: an explicit obscenity is labelled `neutral`, and a customer who is
-# refused throughout is labelled `satisfied`. The labels track prosody, so the
-# prompt has to say so or the model will score the words.
-_DELIVERY_RULE = """HOW SOMETHING IS SAID MATTERS MORE THAN WHAT IS SAID.
-
-Judge the customer's emotional tone from vocal delivery: pitch contour, pace,
-volume dynamics, tension, tremor, sighing, interruption. Do NOT infer tone from:
-  - profanity or insults - these can be delivered flatly and calmly
-  - whether the customer got what they wanted - a refused request delivered
-    politely is not frustration
-  - the topic being a complaint - describing a problem calmly is neutral
-A customer who swears in a flat voice is neutral. A customer who is told "no"
-repeatedly but stays pleasant and agreeable is satisfied or neutral, not upset."""
+# Weighting delivery over word choice is defensible: the target labels describe
+# how a customer sounds, not what they ask for.
+#
+# An earlier version of this block also gave worked examples ("a customer who
+# swears in a flat voice is neutral", "told no repeatedly but stays pleasant is
+# not upset"). Those examples described the three provided calls almost exactly,
+# and measurement showed they collapsed ALL SEVEN label fields to a single
+# constant answer across acoustically different clips - the model stopped
+# listening and recited the prompt. They are removed deliberately: no worked
+# examples, and no label name is ever paired with a scenario.
+_DELIVERY_RULE = """Weigh vocal delivery - pitch movement, pace, volume dynamics, tension,
+tremor, sighing, interruption - at least as heavily as word choice when judging the
+customer's emotional tone. Word choice alone can mislead in either direction: strong
+language may be delivered flatly, and a serious complaint may be delivered calmly.
+Describe what you actually hear in the voice, then choose the label that fits it."""
 
 _CUSTOMER_RULE = """This recording is a single mixed mono channel from a car dealership service
 department: the dealership agent and the customer are summed together. The agent
@@ -80,14 +80,25 @@ FIELD DEFINITIONS
 
 {ONTOLOGY_NOTES}
 
-Before choosing any label, write your evidence fields. Describe background sounds
-in noise_evidence WITHOUT reference to signal degradation. Describe signal defects
-in quality_evidence WITHOUT reference to background sounds. These are scored
-separately and must not be conflated.
+The agent's voice may be synthetic text-to-speech. Synthetic or robotic timbre in
+the AGENT's voice is NOT an audio_quality defect - audio_quality describes
+transmission and capture integrity, not whether a speaker sounds artificial.
 
-Most production calls are technically clear. Reserve slightly_impaired and
-severely_impaired for audible defects in the captured signal, not for background
-sounds and not for a difficult conversation."""
+LISTEN ACTIVELY FOR NON-SPEECH SOUND. During pauses and behind the speech, note any
+television, music, office chatter, traffic, typing, wind, machinery, hiss, static or
+line noise. Hiss and static DO count as background noise.
+
+LISTEN FOR OVERLAPPING SPEECH: any point where both parties are audible at once -
+interruptions, talk-over, one party starting before the other has finished.
+
+Before choosing any label, write your evidence fields. Describe background sounds in
+noise_evidence WITHOUT reference to signal degradation. Describe signal defects in
+quality_evidence WITHOUT reference to background sounds. These are scored separately
+and must not be conflated.
+
+Your labels must agree with your own evidence. If noise_evidence describes an audible
+sound, background_noise_present must be true and the severity must not be none. If it
+describes nothing, background_noise_present must be false."""
 
 
 @dataclass

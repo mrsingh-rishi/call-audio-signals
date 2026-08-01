@@ -1,23 +1,28 @@
 # Render Blueprint. Deploy with: render blueprint launch (or connect the repo
 # in the Render dashboard and it will pick this up).
 #
-# Plan note: `starter` is $7/mo with 512 MB. The free plan spins down after 15
-# minutes of inactivity with a ~60 s cold start, which conflicts with the
-# brief's requirement that the deployment stay available through the evaluation
-# period - so free is not used even though the image would fit it.
+# PLAN: currently `free`, which is what the account can create without a card
+# on file. Measured peak RSS is 60 MB, so 512 MB is ample either way.
+#
+# Before handing the URL to a reviewer, change this to `starter` ($7/mo, same
+# 512 MB). The free plan spins down after 15 minutes of inactivity with a ~60 s
+# cold start, which conflicts with the brief's requirement that the deployment
+# remain available through the evaluation period. Upgrading requires adding a
+# payment method in the Render dashboard.
+#
+# No disk is mounted. Staged audio is deliberately ephemeral - it is deleted
+# when a batch finishes anyway, and ephemeral storage means it cannot survive a
+# restart either. The trade-off is that prediction results are lost on redeploy;
+# results are downloadable as CSV/JSON, so that is acceptable.
 services:
   - type: web
     name: autoace-voice-tone
     runtime: docker
-    plan: starter
+    plan: free
     region: oregon
     dockerfilePath: ./Dockerfile
     healthCheckPath: /api/health
-    autoDeploy: false
-    disk:
-      name: state
-      mountPath: /app/uploads
-      sizeGB: 1
+    autoDeploy: true
     envVars:
       # Secrets are set in the Render dashboard, never committed.
       - key: GEMINI_API_KEY
