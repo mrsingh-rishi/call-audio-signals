@@ -74,18 +74,28 @@ def _f0_track(fr: np.ndarray, voiced: np.ndarray) -> tuple[np.ndarray, np.ndarra
     n = fr.shape[0]
     if n == 0:
         return np.zeros(0), np.zeros(0)
-    x = fr - fr.mean(axis=1, keepdims=True)
     nfft = 1 << int(np.ceil(np.log2(2 * FRAME)))
-    spec = np.fft.rfft(x, n=nfft, axis=1)
-    ac = np.fft.irfft(spec * np.conj(spec), n=nfft, axis=1)[:, :FRAME]
-    zero = ac[:, :1].copy()
-    zero[zero <= 0] = 1e-20
-    ac = ac / zero
-
     lo, hi = int(SR / 320), int(SR / 70)
-    band = ac[:, lo:hi]
-    idx = np.argmax(band, axis=1)
-    peak = band[np.arange(n), idx]
+
+    # Batched: computing the FFT for every frame at once allocates an
+    # (n_frames, 1024) complex array - 88 MB on a 172-second clip, and the
+    # inverse transform another 88 MB. That was a major contributor to the
+    # 512 MiB container OOM. Batching bounds the peak without changing results.
+    idx = np.empty(n, dtype=np.int64)
+    peak = np.empty(n, dtype=np.float64)
+    BATCH = 1024
+    for s0 in range(0, n, BATCH):
+        blk = fr[s0:s0 + BATCH].astype(np.float32, copy=False)
+        blk = blk - blk.mean(axis=1, keepdims=True)
+        spec = np.fft.rfft(blk, n=nfft, axis=1)
+        ac = np.fft.irfft((spec * np.conj(spec)).real, n=nfft, axis=1)[:, :FRAME]
+        zero = ac[:, :1].copy()
+        zero[zero <= 0] = 1e-20
+        band = (ac / zero)[:, lo:hi]
+        bi = np.argmax(band, axis=1)
+        idx[s0:s0 + len(bi)] = bi
+        peak[s0:s0 + len(bi)] = band[np.arange(len(bi)), bi]
+        del spec, ac, band, blk
     f0 = SR / (lo + idx).astype(np.float64)
 
     ok = voiced & (peak > 0.30)

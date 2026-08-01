@@ -43,7 +43,11 @@ services:
         value: "false"
       - key: UPLOAD_RETENTION_HOURS
         value: "24"
+      # 2, not 4: a 172-second clip peaks around 286 MB during analysis and the
+      # instance limit is 512 MiB. The service was OOM-killed at concurrency 4
+      # before the memory work below (chunked features, float32 frames, batched
+      # F0 FFT) brought the peak down from 637 MB.
       - key: MAX_CONCURRENCY
-        value: "4"
+        value: "2"
       - key: PYTHONUNBUFFERED
         value: "1"

@@ -198,7 +198,8 @@ def _downmix_filter(channels: int) -> str:
     return "pan=mono|c0=" + "+".join(f"{w:.10f}*c{i}" for i in range(channels))
 
 
-def decode(path: str | Path, sr: int = WORK_SR, mono: bool = True) -> np.ndarray:
+def decode(path: str | Path, sr: int = WORK_SR, mono: bool = True,
+           start_s: float = 0.0, dur_s: float | None = None) -> np.ndarray:
     """Decode to float64 PCM.
 
     Returns shape ``(n,)`` when ``mono`` else ``(n, channels)``. Decoding to
@@ -208,7 +209,13 @@ def decode(path: str | Path, sr: int = WORK_SR, mono: bool = True) -> np.ndarray
     """
     _require_ffmpeg()
     pr = probe(path)
-    cmd = ["ffmpeg", "-v", "error", "-i", str(path), "-map", "0:a:0"]
+    cmd = ["ffmpeg", "-v", "error"]
+    if start_s:
+        cmd += ["-ss", f"{start_s:.3f}"]          # seek before -i: fast and cheap
+    cmd += ["-i", str(path)]
+    if dur_s is not None:
+        cmd += ["-t", f"{dur_s:.3f}"]
+    cmd += ["-map", "0:a:0"]
     if mono:
         cmd += ["-af", _downmix_filter(pr.channels)]
     else:

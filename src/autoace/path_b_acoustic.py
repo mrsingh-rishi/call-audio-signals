@@ -72,10 +72,18 @@ class AcousticResult:
 
 
 def _frames(x: np.ndarray, n: int = FRAME, hop: int = HOP) -> np.ndarray:
+    """Frame the signal.
+
+    float32 deliberately: a 172-second clip produces a (10744, 512) matrix, which
+    is 44 MB in float64 and 22 MB in float32. Several of these exist at once
+    across the analysis paths, and the container OOM-killed at 512 MiB on exactly
+    that clip. float32 is far more precision than any of these measurements need.
+    """
     if x.size < n:
-        return np.empty((0, n))
+        return np.empty((0, n), dtype=np.float32)
     count = 1 + (x.size - n) // hop
-    return x[np.arange(n)[None, :] + hop * np.arange(count)[:, None]]
+    idx = np.arange(n)[None, :] + hop * np.arange(count)[:, None]
+    return x[idx].astype(np.float32, copy=False)
 
 
 def _vad(fr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -302,14 +310,68 @@ FEATURE_NAMES: tuple[str, ...] = (
 )
 
 
+CHUNK_S = 60.0
+"""Clips longer than this are analysed in chunks and the features aggregated.
+
+Whole-clip analysis allocates several (n_frames x 512) matrices at once. On a
+172-second clip that peaked at 637 MB and OOM-killed the 512 MiB container.
+Chunking bounds peak memory by clip *chunk* rather than clip length, which is
+what makes a 45-minute recording survivable at all.
+"""
+
+_MAX_AGG = {"longest_silence_s", "longest_speech_gap_s", "clip_frac",
+            "flat_top_frac", "level_range_db"}
+_SUM_AGG = {"n_gaps_over_3s"}
+
+
 def extract_features(path: str | Path) -> dict[str, float]:
+    """Feature vector, chunked for long clips to bound peak memory."""
+    from .ingest import probe as _probe
+    try:
+        duration = _probe(path).duration_s
+    except Exception:  # noqa: BLE001
+        duration = 0.0
+
+    if duration <= CHUNK_S * 1.5:
+        return _extract_features_window(path)
+
+    n_chunks = int(np.ceil(duration / CHUNK_S))
+    parts: list[dict[str, float]] = []
+    for i in range(n_chunks):
+        start = i * CHUNK_S
+        length = min(CHUNK_S, duration - start)
+        if length < 1.0:
+            continue
+        try:
+            parts.append(_extract_features_window(path, start_s=start, dur_s=length))
+        except Exception:  # noqa: BLE001
+            continue
+    if not parts:
+        return dict.fromkeys(FEATURE_NAMES, 0.0)
+
+    out: dict[str, float] = {}
+    for k in FEATURE_NAMES:
+        vals = [p[k] for p in parts if k in p]
+        if not vals:
+            out[k] = 0.0
+        elif k in _MAX_AGG:
+            out[k] = float(max(vals))
+        elif k in _SUM_AGG:
+            out[k] = float(sum(vals))
+        else:
+            out[k] = float(sum(vals) / len(vals))
+    return out
+
+
+def _extract_features_window(path: str | Path, start_s: float = 0.0,
+                             dur_s: float | None = None) -> dict[str, float]:
     """Fixed-length acoustic feature vector.
 
     Used identically at fitting time and at inference time, so a threshold
     fitted on the proxy set means the same thing in production. Every feature is
     cheap numpy over one STFT - no model weights, nothing to download.
     """
-    x = decode(path, sr=SR, mono=True)
+    x = decode(path, sr=SR, mono=True, start_s=start_s, dur_s=dur_s)
     fr = _frames(x)
     if fr.shape[0] == 0:
         return dict.fromkeys(FEATURE_NAMES, 0.0)
@@ -412,76 +474,55 @@ def _predict_fitted(feats: dict[str, float]) -> dict[str, Any] | None:
 
 
 def analyse_acoustics(path: str | Path) -> AcousticResult:
-    """Deterministic analysis of the objective fields. Never raises on content."""
-    x = decode(path, sr=SR, mono=True)
-    fr = _frames(x)
+    """Deterministic analysis of the objective fields. Never raises on content.
+
+    Everything derives from a SINGLE :func:`extract_features` pass. An earlier
+    version framed the audio here and then called ``extract_features(path)``,
+    which decoded and framed the entire clip a second time - together with the
+    prosody path that meant three full passes over a 172-second clip and a
+    637 MB peak, which OOM-killed the 512 MiB container.
+    """
     res = AcousticResult()
-    if fr.shape[0] == 0:
-        res.notes.append("clip too short for frame analysis")
+    try:
+        feats = extract_features(path)
+    except Exception as exc:  # noqa: BLE001
+        res.notes.append(f"feature extraction failed: {type(exc).__name__}")
         return res
 
-    voiced, rms_db = _vad(fr)
-    speech_db = float(np.median(rms_db[voiced])) if voiced.any() else float(np.max(rms_db))
-    nonspeech_db = float(np.median(rms_db[~voiced])) if (~voiced).any() else -120.0
+    snr = feats["snr_db"]
+    flat = feats["noise_flatness"]
+    centroid = feats["noise_centroid_hz"]
+    rolloff = feats["speech_rolloff_hz"]
 
-    # Noise measured by minimum statistics, not on VAD-inverted frames - the
-    # latter breaks down exactly when the noise is loudest. See _noise_psd_minstat.
-    snr, flat, centroid = _noise_stats(fr)
-    dual = _dual_pitch_fraction(fr, voiced)
-    longest_sil = _longest_silence(rms_db, speech_db)
-
-    # Bandwidth on speech frames only - quality is about the speech channel.
-    rolloff = 0.0
-    if voiced.any():
-        sp = np.abs(np.fft.rfft(fr[voiced] * np.hanning(FRAME), axis=1)) ** 2
-        prof = sp.mean(axis=0)
-        if prof.sum() > 0:
-            cum = np.cumsum(prof) / prof.sum()
-            rolloff = float(np.fft.rfftfreq(FRAME, 1 / SR)[np.searchsorted(cum, 0.995)])
-
-    # Prefer the coefficients fitted on the proxy set. The hand-written rules
-    # below them scored 3/3 on the three provided calls and 3/16 on the proxy
-    # eval split, so they are a fallback for when no model file is present, not
-    # the primary path.
-    fitted = _predict_fitted(extract_features(path))
+    fitted = _predict_fitted(feats)
     if fitted:
         res.background_noise_present = bool(fitted["background_noise_present"])
         res.background_noise_severity = str(fitted["background_noise_severity"])
         res.speaker_overlap_present = bool(fitted["speaker_overlap_present"])
         res.long_silence_present = bool(fitted["long_silence_present"])
-        # audio_quality deliberately does NOT use the fitted classifier. It
-        # reaches only 0.467 exact on the proxy eval split (chance on three
-        # classes is 0.33) and it regresses on real audio: it calls two of the
-        # three provided calls `severely_impaired` where ground truth is `clear`.
-        # The proxy set's quality definitions are the weakest part of the
-        # generator - they are my invention, not measured from real calls - so
-        # the bandwidth rule below, which defaults to `clear`, is kept instead.
-        # This is a judgement call made against n=3 and is flagged as such in
-        # the validation report.
-        # Noise TYPE still comes from spectral character - it is not a field the
-        # classifier was fitted for.
+        # audio_quality deliberately does NOT use the fitted classifier: it
+        # reaches only 0.467 exact on the proxy eval split (chance is 0.33 on
+        # three classes) and called two genuinely-clear real calls
+        # `severely_impaired`. The bandwidth rule below is kept instead. This is
+        # a judgement call against n=3 and is flagged in the validation report.
         _, res.background_noise_type, _ = _classify_noise(flat, centroid, snr)
         if not res.background_noise_present:
             res.background_noise_type = ""
             res.background_noise_severity = "none"
-        elif not res.background_noise_type:
-            res.background_noise_type = "background noise"
-        if res.background_noise_present and res.background_noise_severity == "none":
-            res.background_noise_severity = "low"
+        else:
+            if not res.background_noise_type:
+                res.background_noise_type = "background noise"
+            if res.background_noise_severity == "none":
+                res.background_noise_severity = "low"
         res.notes.append("fitted detectors (proxy-set coefficients)")
-        res.metrics = {}
     else:
         res.background_noise_present, res.background_noise_type, res.background_noise_severity = (
             _classify_noise(flat, centroid, snr)
         )
-        res.speaker_overlap_present = bool(dual > DUAL_PITCH_OVERLAP)
-        res.long_silence_present = bool(longest_sil >= SILENCE_MIN_S)
+        res.speaker_overlap_present = bool(feats["dual_pitch_frac"] > DUAL_PITCH_OVERLAP)
+        res.long_silence_present = bool(feats["longest_speech_gap_s"] >= SILENCE_MIN_S)
         res.notes.append("rule fallback (no fitted coefficients found)")
 
-    # audio_quality deliberately defaults to `clear`. It is reserved for defects
-    # in the captured signal, and neither background sound nor a synthetic agent
-    # voice is such a defect. Severe band-limiting is the one cheap, unambiguous
-    # indicator available without a reference signal.
     if rolloff and rolloff < 1700:
         res.audio_quality = "severely_impaired"
         res.notes.append(f"speech bandwidth only {rolloff:.0f} Hz")
@@ -489,15 +530,5 @@ def analyse_acoustics(path: str | Path) -> AcousticResult:
         res.audio_quality = "slightly_impaired"
         res.notes.append(f"speech bandwidth {rolloff:.0f} Hz")
 
-    res.metrics = {
-        "speech_db": round(speech_db, 2),
-        "nonspeech_db": round(nonspeech_db, 2),
-        "snr_db": round(snr, 2),
-        "nonspeech_flatness": round(flat, 4),
-        "nonspeech_centroid_hz": round(centroid, 1),
-        "dual_pitch_frac": round(dual, 4),
-        "longest_interior_silence_s": round(longest_sil, 2),
-        "speech_rolloff_hz": round(rolloff, 1),
-        "speech_frac": round(float(voiced.mean()), 3),
-    }
+    res.metrics = {k: round(float(v), 4) for k, v in feats.items()}
     return res
