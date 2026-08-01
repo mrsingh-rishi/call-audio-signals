@@ -6,13 +6,31 @@ Deliverable 8. All figures measured, not modelled.
 
 ## 1. Headline
 
-| environment | mean per clip | per audio-minute |
+| environment | mean per clip | notes |
 |---|---|---|
-| Local Docker container | **4.4 s** | ~1.1 s |
-| Deployed (Render free, 0.1 CPU) | **5.9 s** | ~1.5 s |
-| Local, direct | 4.1–5.3 s | ~1.0 s |
+| Local, direct | **4.1–5.3 s** | 8-core M3, concurrency 4 |
+| Local Docker container | **4.4 s** | same host |
+| **Deployed (Render free, 0.1 CPU)** | **40.5 s** | concurrency 2 — see below |
 
-Measured on the three provided calls (31 s, 35 s, 172 s) at concurrency 4.
+Measured on the three provided calls (31 s, 35 s, 172 s): 32.9 s, 33.0 s, 55.5 s.
+
+### Why the deployed figure is 7x the local one
+
+Two changes made to stop the container being OOM-killed, compounded by the free
+plan's CPU allocation:
+
+1. **Concurrency lowered 4 -> 2** for memory headroom, halving throughput.
+2. **Paths B and C now do real CPU work on every file** — chunked feature
+   extraction re-invokes ffmpeg per 60-second chunk, and the prosody path runs a
+   batched FFT over every frame. Locally that is ~0.5–1.5 s; the analysis is
+   CPU-bound, so it scales directly with available CPU.
+3. **Render's free plan allocates 0.1 CPU.** Starter allocates 0.5 CPU — **5x** —
+   so the upgrade that fixes cold start also cuts this figure substantially. That
+   is now the primary argument for it, ahead of spin-down.
+
+This is an honest regression: the earlier 5.9 s figure was measured when Path C
+did not exist and Path B was doing far less work. Correctness came first; the
+remedy for the latency is a plan change rather than a code change.
 
 ---
 
@@ -77,9 +95,11 @@ after 15 minutes of inactivity.
 **This is a submission risk, not a technical one.** The brief requires the
 deployment to "remain available through the evaluation period", and a reviewer
 clicking a cold link waits half a minute. The fix is one line — `plan: free` →
-`plan: starter` in `render.yaml`, $7/month, same 512 MB — and it requires a
-payment method on the Render account, which the API rejected with HTTP 402 at
-deploy time.
+`plan: starter` in `render.yaml`, $7/month — and it requires a payment method on
+the Render account, which the API rejected with HTTP 402 at deploy time.
+
+Starter also raises the CPU allocation from **0.1 to 0.5 CPU**, which addresses
+the per-clip latency above at the same time.
 
 Container memory is not the constraint: **peak RSS is 119 MiB** processing a
 5-file batch including a 172-second clip, against a 512 MB limit — roughly 4×

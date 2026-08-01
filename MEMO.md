@@ -240,7 +240,17 @@ from live `usageMetadata`, not estimated. Paths B and C are $0. Reported
 *uncached*: implicit caching made repeated benchmark runs look 3.5× cheaper, and
 quoting that number would have been misleading.
 
-**Latency:** 4–6 s per clip, ~3.6 s per audio-minute, concurrency 4.
+**Latency:** 4–5 s per clip locally; **40 s per clip on the deployed free plan**,
+which allocates 0.1 CPU. The analysis paths are CPU-bound, so the Starter plan's
+0.5 CPU would cut this roughly 5x. Documented rather than hidden — see
+`latency_analysis.md`.
+
+**A production bug worth recording:** the container was OOM-killed at 512 MiB on
+the 172-second clip. `analyse_acoustics` was decoding and framing the whole clip
+a second time via `extract_features`, frame matrices were float64, and the F0
+tracker allocated an (n_frames x 1024) complex array for the entire clip. Peak
+went 637 MB -> 286 MB, and long clips are now chunked so memory is bounded by
+chunk rather than by duration.
 
 **Privacy:** paid Gemini tier only — free tier trains on submitted content and
 would breach the confidentiality constraint. Audio deleted on batch completion or
