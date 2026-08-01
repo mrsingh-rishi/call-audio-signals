@@ -101,10 +101,16 @@ the Render account, which the API rejected with HTTP 402 at deploy time.
 Starter also raises the CPU allocation from **0.1 to 0.5 CPU**, which addresses
 the per-clip latency above at the same time.
 
-Container memory is not the constraint: **peak RSS is 119 MiB** processing a
-5-file batch including a 172-second clip, against a 512 MB limit — roughly 4×
-headroom. That is only true because the architecture avoided the 660 MB–1.1 GB
-speech-emotion models; the fitted classifiers ship as **16 KB of JSON**.
+Container memory **was** the binding constraint and is now controlled. The
+deployed service was OOM-killed at the 512 MiB limit while processing the
+172-second clip; the failure reproduced locally at **637 MB peak**. Three fixes —
+deriving all acoustic features from a single pass instead of decoding the clip
+three times, float32 frame matrices, and batching the F0 FFT — brought that to
+**286 MB**, and chunked extraction now bounds memory by chunk rather than by clip
+length, which is what makes a 45-minute recording survivable.
+
+The architecture avoiding the 660 MB–1.1 GB speech-emotion models is what leaves
+any headroom at all; the fitted classifiers ship as **16 KB of JSON**.
 
 ---
 
