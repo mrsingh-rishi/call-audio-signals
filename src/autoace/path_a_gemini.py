@@ -138,9 +138,26 @@ class CallUsage:
         cost += (self.output_tokens + self.thought_tokens) * p.text_out_per_m / 1e6
         return cost
 
+    def cost_uncached_usd(self, model: str | None = None) -> float:
+        """Cost as if nothing had been cached - the honest worst case.
+
+        Implicit caching is opportunistic: re-running the same clip caches the
+        audio itself, which makes a repeated benchmark look far cheaper than a
+        production run over distinct files. In production only the stable system
+        prefix realistically caches, so this figure is the one to quote for
+        ceiling compliance.
+        """
+        p = PRICING.get(model or self.model) or PRICING["gemini-2.5-flash-lite"]
+        return (self.prompt_tokens * p.audio_in_per_m
+                + (self.output_tokens + self.thought_tokens) * p.text_out_per_m) / 1e6
+
     def cost_per_audio_min(self, duration_s: float, model: str | None = None) -> float:
         minutes = max(duration_s / 60.0, 1e-9)
         return self.cost_usd(model) / minutes
+
+    def cost_uncached_per_audio_min(self, duration_s: float, model: str | None = None) -> float:
+        minutes = max(duration_s / 60.0, 1e-9)
+        return self.cost_uncached_usd(model) / minutes
 
 
 def _mime_for(path: Path) -> str:

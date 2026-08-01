@@ -16,9 +16,24 @@ from typing import Any
 from google import genai
 
 from .config import COST_CEILING_PER_AUDIO_MIN, Settings, get_settings
+from .fusion import fuse
 from .ingest import AudioIngestError, probe
 from .path_a_gemini import analyse_single
+from .path_b_acoustic import analyse_acoustics
 from .schema import CallAnalysis
+
+
+class _EmptyUsage:
+    """Zero-cost stand-in when only the deterministic path ran."""
+
+    prompt_tokens = output_tokens = thought_tokens = cached_tokens = 0
+    latency_s = 0.0
+
+    def cost_usd(self, model: str | None = None) -> float:
+        return 0.0
+
+    def cost_per_audio_min(self, duration_s: float, model: str | None = None) -> float:
+        return 0.0
 
 
 @dataclass
@@ -31,11 +46,16 @@ class PredictionResult:
     latency_s: float = 0.0
     cost_usd: float = 0.0
     cost_per_audio_min: float = 0.0
+    cost_uncached_usd: float = 0.0
+    cost_uncached_per_audio_min: float = 0.0
     model: str = ""
     tokens: dict[str, int] = field(default_factory=dict)
     evidence: dict[str, str] = field(default_factory=dict)
     repairs: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    sources: dict[str, str] = field(default_factory=dict)
+    disagreements: list[str] = field(default_factory=list)
+    acoustic_metrics: dict[str, float] = field(default_factory=dict)
 
     def to_row(self) -> dict[str, Any]:
         """Flat dict for the results table / CSV export."""
@@ -81,29 +101,43 @@ def analyse_file(
         result.latency_s = time.perf_counter() - t0
         return result
 
-    if not s.gemini_enabled:
-        result.status = "error"
-        result.reason = (
-            "no analysis path available: Gemini is disabled "
-            "(LOCAL_ONLY=true or no API key) and the local path is not installed"
-        )
-        result.latency_s = time.perf_counter() - t0
-        return result
-
+    # Path B is deterministic, local and free, so it always runs - including in
+    # LOCAL_ONLY mode, where it is the only analysis available.
+    acoustic = None
     try:
-        analysis, meta = analyse_single(p, settings=s, client=client)
-    except Exception as exc:  # noqa: BLE001 - deliberate: isolate per file
+        acoustic = analyse_acoustics(p)
+    except Exception as exc:  # noqa: BLE001
+        result.warnings.append(f"acoustic path failed: {type(exc).__name__}")
+
+    gemini_analysis = None
+    meta: dict[str, Any] = {}
+    if s.gemini_enabled:
+        try:
+            gemini_analysis, meta = analyse_single(p, settings=s, client=client)
+        except Exception as exc:  # noqa: BLE001 - deliberate: isolate per file
+            result.warnings.append(f"gemini path failed: {type(exc).__name__}: {str(exc)[:120]}")
+
+    if gemini_analysis is None and acoustic is None:
         result.status = "error"
-        result.reason = f"{type(exc).__name__}: {str(exc)[:280]}"
+        result.reason = "both analysis paths failed for this file"
         result.latency_s = time.perf_counter() - t0
         return result
 
-    usage = meta["usage"]
-    result.analysis = analysis.to_output_dict()
-    result.model = meta["model"]
+    outcome = fuse(gemini_analysis, acoustic)
+    usage = meta.get("usage") or _EmptyUsage()
+    result.analysis = outcome.analysis.to_output_dict()
+    result.model = meta.get("model", "acoustic-only")
+    result.sources = outcome.sources
+    result.disagreements = outcome.disagreements
+    if acoustic is not None:
+        result.acoustic_metrics = acoustic.metrics
     result.latency_s = time.perf_counter() - t0
     result.cost_usd = usage.cost_usd(result.model)
     result.cost_per_audio_min = usage.cost_per_audio_min(pr.duration_s, result.model)
+    if hasattr(usage, 'cost_uncached_usd'):
+        result.cost_uncached_usd = usage.cost_uncached_usd(result.model)
+        result.cost_uncached_per_audio_min = usage.cost_uncached_per_audio_min(
+            pr.duration_s, result.model)
     result.tokens = {
         "prompt": usage.prompt_tokens,
         "output": usage.output_tokens,
@@ -111,9 +145,9 @@ def analyse_file(
         "cached": usage.cached_tokens,
     }
     result.evidence = {k: str(v) for k, v in meta.get("evidence", {}).items()}
-    result.repairs = list(meta.get("repairs", []))
+    result.repairs = list(meta.get("repairs", [])) + list(outcome.repairs)
 
-    if result.cost_per_audio_min > COST_CEILING_PER_AUDIO_MIN:
+    if max(result.cost_per_audio_min, result.cost_uncached_per_audio_min) > COST_CEILING_PER_AUDIO_MIN:
         result.warnings.append(
             f"cost ${result.cost_per_audio_min:.6f}/audio-min exceeds the "
             f"${COST_CEILING_PER_AUDIO_MIN} ceiling"

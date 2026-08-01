@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from autoace.config import COST_CEILING_PER_AUDIO_MIN, REPO_ROOT, get_settings  # noqa: E402
 from autoace.ingest import AudioIngestError, probe  # noqa: E402
 from autoace.metrics import format_report, score_batch  # noqa: E402
-from autoace.path_a_gemini import analyse_single  # noqa: E402
+from autoace.predict import analyse_file  # noqa: E402
 
 
 def read_labels(path: Path) -> dict[str, dict[str, Any]]:
@@ -70,34 +70,39 @@ def main(argv: list[str] | None = None) -> int:
     t_wall = time.perf_counter()
 
     for path in files:
-        try:
-            pr = probe(path)
-            analysis, meta = analyse_single(path, settings=s, model=model)
-        except (AudioIngestError, RuntimeError, Exception) as exc:  # noqa: BLE001
-            reason = getattr(exc, "reason", None) or f"{type(exc).__name__}: {exc}"
-            print(f"{path.name}: ERROR - {reason}\n")
-            predictions[path.name] = {"status": "error", "reason": str(reason)[:300]}
+        # Goes through the fused orchestrator - Path A + Path B - which is
+        # exactly what the dashboard and the hidden-set run will use.
+        res = analyse_file(path, settings=s)
+        if res.status != "ok" or not res.analysis:
+            print(f"{path.name}: ERROR - {res.reason}\n")
+            predictions[path.name] = {"status": "error", "reason": str(res.reason)[:300]}
             continue
 
-        usage = meta["usage"]
-        cost = usage.cost_usd(model)
-        per_min = usage.cost_per_audio_min(pr.duration_s, model)
-        total_cost += cost
-        total_audio_s += pr.duration_s
-
-        out = analysis.to_output_dict()
+        total_cost += res.cost_usd
+        total_audio_s += res.duration_s
+        out = res.analysis
         predictions[path.name] = out
 
-        print(f"{'=' * 78}\n{path.name}  ({pr.duration_s:.1f}s)\n{'=' * 78}")
+        print(f"{'=' * 78}\n{path.name}  ({res.duration_s:.1f}s)\n{'=' * 78}")
         print(json.dumps(out, indent=2))
-        print(f"\n  latency {usage.latency_s:.2f}s | in={usage.prompt_tokens} "
-              f"out={usage.output_tokens} thoughts={usage.thought_tokens} "
-              f"cached={usage.cached_tokens}")
-        print(f"  cost ${cost:.6f}  =  ${per_min:.6f}/audio-min  "
-              f"({'OK' if per_min < COST_CEILING_PER_AUDIO_MIN else 'OVER CEILING'})")
-        if meta["repairs"]:
-            print(f"  schema repairs: {meta['repairs']}")
-        for k, v in meta["evidence"].items():
+        print(f"\n  latency {res.latency_s:.2f}s | tokens {res.tokens}")
+        print(f"  cost ${res.cost_usd:.6f}  =  ${res.cost_per_audio_min:.6f}/audio-min  "
+              f"({'OK' if res.cost_per_audio_min < COST_CEILING_PER_AUDIO_MIN else 'OVER CEILING'})")
+        if res.acoustic_metrics:
+            print(f"  acoustic: flatness={res.acoustic_metrics.get('nonspeech_flatness')} "
+                  f"dual_pitch={res.acoustic_metrics.get('dual_pitch_frac')} "
+                  f"snr={res.acoustic_metrics.get('snr_db')}dB")
+        if res.sources:
+            print(f"  field authority: "
+                  + ", ".join(f"{k}={v}" for k, v in res.sources.items()
+                              if v not in ("gemini", "acoustic"))
+                  or "  field authority: default")
+        if res.disagreements:
+            for d in res.disagreements:
+                print(f"  DISAGREEMENT: {d}")
+        if res.repairs:
+            print(f"  schema repairs: {res.repairs}")
+        for k, v in res.evidence.items():
             if v:
                 print(f"  {k}: {v}")
 
