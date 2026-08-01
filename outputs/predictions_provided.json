@@ -1,35 +1,35 @@
 {
   "call_001.ogg": {
-    "emotional_tone": "neutral",
-    "emotional_intensity": "low",
+    "emotional_tone": "upset",
+    "emotional_intensity": "high",
     "background_noise_present": false,
     "background_noise_type": "",
     "background_noise_severity": "none",
     "audio_quality": "clear",
-    "speaker_overlap_present": false,
+    "speaker_overlap_present": true,
     "long_silence_present": false,
-    "confidence": 0.82
+    "confidence": 0.66
   },
   "call_002.ogg": {
-    "emotional_tone": "upset",
-    "emotional_intensity": "high",
+    "emotional_tone": "distressed",
+    "emotional_intensity": "medium",
     "background_noise_present": true,
-    "background_noise_type": "television",
-    "background_noise_severity": "medium",
+    "background_noise_type": "background noise",
+    "background_noise_severity": "low",
     "audio_quality": "clear",
-    "speaker_overlap_present": true,
+    "speaker_overlap_present": false,
     "long_silence_present": false,
     "confidence": 0.66
   },
   "call_003.ogg": {
-    "emotional_tone": "neutral",
-    "emotional_intensity": "low",
-    "background_noise_present": true,
-    "background_noise_type": "static",
-    "background_noise_severity": "high",
+    "emotional_tone": "upset",
+    "emotional_intensity": "high",
+    "background_noise_present": false,
+    "background_noise_type": "",
+    "background_noise_severity": "none",
     "audio_quality": "clear",
     "speaker_overlap_present": true,
     "long_silence_present": false,
-    "confidence": 0.66
+    "confidence": 0.58
   }
 }

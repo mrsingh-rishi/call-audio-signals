@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -371,6 +372,45 @@ def feature_vector(feats: dict[str, float]) -> np.ndarray:
     return np.array([feats.get(k, 0.0) for k in FEATURE_NAMES], dtype=np.float64)
 
 
+_COEF_PATH = Path(__file__).with_name("detector_coefficients.json")
+_COEF_CACHE: dict[str, Any] | None = None
+
+
+def _fitted_model() -> dict[str, Any] | None:
+    """Load the coefficients fitted on the proxy set, if present."""
+    global _COEF_CACHE
+    if _COEF_CACHE is None:
+        if not _COEF_PATH.exists():
+            return None
+        import json
+        _COEF_CACHE = json.loads(_COEF_PATH.read_text())
+    return _COEF_CACHE
+
+
+def _predict_fitted(feats: dict[str, float]) -> dict[str, Any] | None:
+    """Apply the fitted detectors. Returns None when no model is available.
+
+    Inference is a standardise-then-dot-product, so nothing beyond numpy is
+    needed in the container - scikit-learn is a fitting-time dependency only.
+    """
+    model = _fitted_model()
+    if not model:
+        return None
+    names = model["feature_names"]
+    v = np.array([feats.get(k, 0.0) for k in names], dtype=np.float64)
+    v = (v - np.array(model["mean"])) / np.array(model["std"])
+
+    out: dict[str, Any] = {}
+    for field_name, spec in model["fields"].items():
+        if spec["type"] == "binary":
+            z = float(np.array(spec["coef"]) @ v + spec["intercept"])
+            out[field_name] = bool(z > 0)
+        else:
+            z = np.array(spec["coef"]) @ v + np.array(spec["intercept"])
+            out[field_name] = spec["classes"][int(np.argmax(z))]
+    return out
+
+
 def analyse_acoustics(path: str | Path) -> AcousticResult:
     """Deterministic analysis of the objective fields. Never raises on content."""
     x = decode(path, sr=SR, mono=True)
@@ -399,11 +439,44 @@ def analyse_acoustics(path: str | Path) -> AcousticResult:
             cum = np.cumsum(prof) / prof.sum()
             rolloff = float(np.fft.rfftfreq(FRAME, 1 / SR)[np.searchsorted(cum, 0.995)])
 
-    res.background_noise_present, res.background_noise_type, res.background_noise_severity = (
-        _classify_noise(flat, centroid, snr)
-    )
-    res.speaker_overlap_present = bool(dual > DUAL_PITCH_OVERLAP)
-    res.long_silence_present = bool(longest_sil >= SILENCE_MIN_S)
+    # Prefer the coefficients fitted on the proxy set. The hand-written rules
+    # below them scored 3/3 on the three provided calls and 3/16 on the proxy
+    # eval split, so they are a fallback for when no model file is present, not
+    # the primary path.
+    fitted = _predict_fitted(extract_features(path))
+    if fitted:
+        res.background_noise_present = bool(fitted["background_noise_present"])
+        res.background_noise_severity = str(fitted["background_noise_severity"])
+        res.speaker_overlap_present = bool(fitted["speaker_overlap_present"])
+        res.long_silence_present = bool(fitted["long_silence_present"])
+        # audio_quality deliberately does NOT use the fitted classifier. It
+        # reaches only 0.467 exact on the proxy eval split (chance on three
+        # classes is 0.33) and it regresses on real audio: it calls two of the
+        # three provided calls `severely_impaired` where ground truth is `clear`.
+        # The proxy set's quality definitions are the weakest part of the
+        # generator - they are my invention, not measured from real calls - so
+        # the bandwidth rule below, which defaults to `clear`, is kept instead.
+        # This is a judgement call made against n=3 and is flagged as such in
+        # the validation report.
+        # Noise TYPE still comes from spectral character - it is not a field the
+        # classifier was fitted for.
+        _, res.background_noise_type, _ = _classify_noise(flat, centroid, snr)
+        if not res.background_noise_present:
+            res.background_noise_type = ""
+            res.background_noise_severity = "none"
+        elif not res.background_noise_type:
+            res.background_noise_type = "background noise"
+        if res.background_noise_present and res.background_noise_severity == "none":
+            res.background_noise_severity = "low"
+        res.notes.append("fitted detectors (proxy-set coefficients)")
+        res.metrics = {}
+    else:
+        res.background_noise_present, res.background_noise_type, res.background_noise_severity = (
+            _classify_noise(flat, centroid, snr)
+        )
+        res.speaker_overlap_present = bool(dual > DUAL_PITCH_OVERLAP)
+        res.long_silence_present = bool(longest_sil >= SILENCE_MIN_S)
+        res.notes.append("rule fallback (no fitted coefficients found)")
 
     # audio_quality deliberately defaults to `clear`. It is reserved for defects
     # in the captured signal, and neither background sound nor a synthetic agent

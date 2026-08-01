@@ -159,10 +159,10 @@ predicts exactly that failure for audio LLMs.
 | `emotional_tone` | accuracy | 0.428 | 0.258 |
 | `emotional_intensity` | macro-F1 | 0.434 | 0.254 |
 | `background_noise_present` | balanced acc | **0.916** (F1 0.935) | 0.603 |
-| `background_noise_severity` | exact / within-1 | 0.699 / **0.930** | — |
-| `audio_quality` | exact / within-1 | 0.454 / 0.769 | — |
-| `speaker_overlap_present` | balanced acc | **0.559** | 0.524 |
-| `long_silence_present` | balanced acc | see §6 | 0.633 |
+| `background_noise_severity` | exact / within-1 | 0.690 / **0.934** | — |
+| `audio_quality` | exact / within-1 | 0.467 / 0.769 | — |
+| `speaker_overlap_present` | balanced acc | **0.577** | 0.524 |
+| `long_silence_present` | balanced acc | **0.747** | 0.633 |
 
 **Per-class F1 for `emotional_tone`:** upset 0.600 · neutral 0.505 · satisfied
 0.393 · distressed 0.358 · **frustrated 0.250**.
@@ -179,7 +179,7 @@ split only; sklearn used for fitting only, never shipped.
 
 ## 6. Failure modes and limitations
 
-**`speaker_overlap_present` is unsolved.** Balanced accuracy 0.559 against a
+**`speaker_overlap_present` is unsolved.** Balanced accuracy 0.577 against a
 0.524 baseline — effectively chance. The dual-pitch detector fires on ~80% of
 single-speaker windows, and the correlation between injected overlap duration and
 the feature is **0.069**. I tried a windowed maximum to catch localised overlap;

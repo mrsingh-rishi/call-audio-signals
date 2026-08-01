@@ -141,11 +141,11 @@ That is a proxy-set limitation, not a model result.
 
 | field | metric | result | baseline |
 |---|---|---|---|
-| `background_noise_present` | balanced acc / F1 | **0.916 / 0.935** | 0.603 |
-| `background_noise_severity` | exact / within-1 | 0.699 / **0.930** | — |
-| `audio_quality` | exact / within-1 | 0.454 / 0.769 | — |
-| `speaker_overlap_present` | balanced acc | **0.559** | 0.524 |
-| `long_silence_present` | balanced acc | 0.638 → improved, see §5 | 0.633 |
+| `background_noise_present` | balanced acc / F1 | **0.911 / 0.932** | 0.603 |
+| `background_noise_severity` | exact / within-1 | 0.690 / **0.934** | — |
+| `audio_quality` | exact / within-1 | 0.467 / 0.769 | — |
+| `speaker_overlap_present` | balanced acc | **0.577** | 0.524 |
+| `long_silence_present` | balanced acc | **0.747** (F1 0.675) | 0.633 |
 
 ---
 
@@ -162,7 +162,7 @@ Three specific defects, none of which were visible with three clips:
    as loud as speech, the VAD marks noisy frames as *speech*, the "non-speech"
    region empties, and the loudest clips scored as having no noise. Replaced with
    **minimum-statistics** noise estimation, which needs no speech/non-speech
-   decision. `background_noise_present` went to 0.916 balanced accuracy.
+   decision. `background_noise_present` went to 0.911 balanced accuracy.
 
 2. **The silence detector thresholded below the codec noise floor.** A fixed
    −35 dB below a −47 dBFS speech level puts the threshold at −82 dBFS, but
@@ -183,13 +183,37 @@ Three specific defects, none of which were visible with three clips:
 
 Reported as raw agreement only. See `outputs/predictions_provided.json`.
 
-The hybrid system reaches **5/7 scored fields correct** on these clips
-(`background_noise_present`, `speaker_overlap_present`, `audio_quality`,
-`long_silence_present` exact; `background_noise_severity` within-one; noise type
-matching by token overlap — `television`/`TV`, `static`/`sharp static`).
+| field | exact | within-1 |
+|---|---|---|
+| `audio_quality` | **3/3** | 3/3 |
+| `long_silence_present` | **3/3** | — |
+| `emotional_intensity` | 2/3 | **3/3** |
+| `background_noise_present` | 2/3 | — |
+| `emotional_tone` | 1/3 | — |
+| `background_noise_severity` | 1/3 | 2/3 |
+| `speaker_overlap_present` | 1/3 | — |
 
 No claim is made from this. It is a smoke test that the pipeline produces sane
 output on real production audio, nothing more.
+
+### The domain gap, stated plainly
+
+The fitted detectors score **better on the synthetic evaluation split than on
+real audio**. Before fitting, the hand-written rules scored 3/3 on these three
+calls (and 3/16 on the proxy set); after fitting they score 0.911 on the proxy
+set and worse on these three.
+
+Both directions are overfitting to whichever set you look at. The honest reading
+is that **my synthetic proxy has a distribution gap with real production audio** —
+synthesised static and babble are not real TV bleed on a phone line.
+
+One consequence is already applied: `audio_quality` deliberately does *not* use
+the fitted classifier. It reaches only 0.467 exact on the proxy split (chance on
+three classes is 0.33) and it called two genuinely-clear real calls
+`severely_impaired`. The proxy set's quality definitions are the weakest part of
+the generator — they are my invention rather than measured from real calls — so
+the bandwidth rule is retained for that field. **This is a judgement call made
+against n=3 and is flagged as such rather than buried.**
 
 ---
 
