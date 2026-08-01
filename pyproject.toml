@@ -1,0 +1,63 @@
+[project]
+name = "autoace-voice-tone"
+version = "0.1.0"
+description = "Emotional tone and background noise analysis for production call audio"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "numpy>=1.26",
+    "pydantic>=2.7",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+# Web dashboard + batch pipeline. Kept separate so the forensics CLI stays dependency-light.
+server = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "python-multipart>=0.0.9",
+    "itsdangerous>=2.2",
+    "aiosqlite>=0.20",
+]
+# Path A (Gemini).
+gemini = [
+    "google-genai>=1.0",
+]
+# Path B, lean subset that ships in the container: VAD via ONNX, no torch.
+acoustic-lean = [
+    "onnxruntime>=1.18",
+]
+# Path B, full: adds TorchAudio-SQUIM. Container-heavy - see plan section 8.
+acoustic-full = [
+    "torch>=2.4",
+    "torchaudio>=2.4",
+    "soundfile>=0.12",
+]
+# Proxy set construction and validation. Never shipped to the container.
+research = [
+    "scikit-learn>=1.5",
+    "scipy>=1.13",
+    "matplotlib>=3.9",
+    "pandas>=2.2",
+    "requests>=2.32",
+    "tqdm>=4.66",
+]
+dev = [
+    "pytest>=8.2",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.27",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/autoace"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

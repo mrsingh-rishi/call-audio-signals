@@ -1,0 +1,36 @@
+# Confidential production audio - never committed.
+data/provided_calls/
+data/proxy/
+data/corpora/
+*.ogg
+*.wav
+*.mp3
+*.m4a
+*.flac
+
+# Secrets
+.env
+.env.local
+
+# Build artefacts
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+web/node_modules/
+web/dist/
+
+# Runtime state
+uploads/
+*.db
+*.sqlite3
+
+# Model weights (baked at image build, not committed)
+models/
+
+# OS
+.DS_Store
+data/transcripts/
