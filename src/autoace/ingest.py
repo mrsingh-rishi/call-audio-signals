@@ -99,6 +99,24 @@ class LoadedAudio:
     channels: ChannelReport | None = field(default=None)
 
 
+def _clean_ffmpeg_error(stderr: str | bytes | None, path: Path) -> str:
+    """Reduce ffmpeg/ffprobe stderr to one safe, readable line.
+
+    Raw stderr embeds the absolute server path of the staged upload. These
+    strings are surfaced in the dashboard and in downloadable results, so the
+    directory layout must not travel with them.
+    """
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode("utf-8", "replace")
+    lines = [ln.strip() for ln in (stderr or "").strip().splitlines() if ln.strip()]
+    if not lines:
+        return "unreadable by ffmpeg"
+    hint = lines[-1]
+    hint = hint.replace(str(path), path.name).replace(str(path.parent) + "/", "")
+    hint = hint.replace(str(path.parent), "")
+    return hint[:160]
+
+
 def _require_ffmpeg() -> None:
     for tool in ("ffmpeg", "ffprobe"):
         if shutil.which(tool) is None:
@@ -125,9 +143,7 @@ def probe(path: str | Path) -> AudioProbe:
         text=True,
     )
     if proc.returncode != 0:
-        detail = (proc.stderr or "").strip().splitlines()
-        hint = detail[-1] if detail else "unreadable by ffprobe"
-        raise AudioIngestError(f"not decodable as audio ({hint})")
+        raise AudioIngestError(f"not decodable as audio ({_clean_ffmpeg_error(proc.stderr, p)})")
 
     try:
         meta = json.loads(proc.stdout)
@@ -200,9 +216,9 @@ def decode(path: str | Path, sr: int = WORK_SR, mono: bool = True) -> np.ndarray
     cmd += ["-ar", str(sr), "-f", "f32le", "-"]
     proc = subprocess.run(cmd, capture_output=True)
     if proc.returncode != 0:
-        detail = (proc.stderr or b"").decode("utf-8", "replace").strip().splitlines()
-        hint = detail[-1] if detail else "decode failed"
-        raise AudioIngestError(f"audio decode failed ({hint})")
+        raise AudioIngestError(
+            f"audio decode failed ({_clean_ffmpeg_error(proc.stderr, Path(path))})"
+        )
 
     x = np.frombuffer(proc.stdout, dtype=np.float32).astype(np.float64)
     if x.size == 0:

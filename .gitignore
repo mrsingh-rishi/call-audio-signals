@@ -34,3 +34,5 @@ models/
 # OS
 .DS_Store
 data/transcripts/
+*.db-shm
+*.db-wal

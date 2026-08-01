@@ -1,0 +1,35 @@
+{
+  "call_001.ogg": {
+    "emotional_tone": "neutral",
+    "emotional_intensity": "low",
+    "background_noise_present": false,
+    "background_noise_type": "",
+    "background_noise_severity": "none",
+    "audio_quality": "slightly_impaired",
+    "speaker_overlap_present": false,
+    "long_silence_present": false,
+    "confidence": 0.9
+  },
+  "call_002.ogg": {
+    "emotional_tone": "neutral",
+    "emotional_intensity": "low",
+    "background_noise_present": false,
+    "background_noise_type": "",
+    "background_noise_severity": "none",
+    "audio_quality": "slightly_impaired",
+    "speaker_overlap_present": false,
+    "long_silence_present": false,
+    "confidence": 0.9
+  },
+  "call_003.ogg": {
+    "emotional_tone": "neutral",
+    "emotional_intensity": "low",
+    "background_noise_present": false,
+    "background_noise_type": "",
+    "background_noise_severity": "none",
+    "audio_quality": "slightly_impaired",
+    "speaker_overlap_present": false,
+    "long_silence_present": false,
+    "confidence": 0.9
+  }
+}
