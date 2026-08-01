@@ -20,6 +20,7 @@ from .fusion import fuse
 from .ingest import AudioIngestError, probe
 from .path_a_gemini import analyse_single
 from .path_b_acoustic import analyse_acoustics
+from .path_c_prosody import analyse_prosody
 from .schema import CallAnalysis
 
 
@@ -109,6 +110,12 @@ def analyse_file(
     except Exception as exc:  # noqa: BLE001
         result.warnings.append(f"acoustic path failed: {type(exc).__name__}")
 
+    prosody = None
+    try:
+        prosody = analyse_prosody(p)
+    except Exception as exc:  # noqa: BLE001
+        result.warnings.append(f"prosody path failed: {type(exc).__name__}")
+
     gemini_analysis = None
     meta: dict[str, Any] = {}
     if s.gemini_enabled:
@@ -123,7 +130,7 @@ def analyse_file(
         result.latency_s = time.perf_counter() - t0
         return result
 
-    outcome = fuse(gemini_analysis, acoustic)
+    outcome = fuse(gemini_analysis, acoustic, prosody)
     usage = meta.get("usage") or _EmptyUsage()
     result.analysis = outcome.analysis.to_output_dict()
     result.model = meta.get("model", "acoustic-only")

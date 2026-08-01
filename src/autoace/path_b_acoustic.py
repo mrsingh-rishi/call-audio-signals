@@ -147,6 +147,50 @@ def _noise_stats(fr: np.ndarray) -> tuple[float, float, float]:
     return float(snr_db), flatness, centroid
 
 
+def _speech_gap_runs(voiced: np.ndarray) -> np.ndarray:
+    """Durations (s) of interior runs with no speech.
+
+    "Dead air" means no-one is talking, not that the signal is empty. An earlier
+    version thresholded raw frame energy, which fails on any clip with
+    background noise: the degradation chain mixes noise in *after* the silence,
+    so a 12 s gap is full of noise and never crosses an energy threshold. On the
+    proxy set that put the correlation between injected and detected silence at
+    0.48 with a median detection of 1.4 s for injected 12 s gaps.
+    """
+    if voiced.size == 0:
+        return np.zeros(0)
+    quiet = ~voiced
+    edges = np.flatnonzero(np.diff(np.concatenate(([0], quiet.view(np.int8), [0]))))
+    starts, ends = edges[0::2], edges[1::2]
+    lead = int(1.0 * SR / HOP)
+    out = [(e - s) * HOP / SR for s, e in zip(starts, ends)
+           if s > lead and e < voiced.size - lead]
+    return np.array(out) if out else np.zeros(0)
+
+
+def _dual_pitch_windowed(fr: np.ndarray, voiced: np.ndarray,
+                         win_s: float = 2.0) -> tuple[float, float]:
+    """Return (global dual-pitch fraction, max over a sliding window).
+
+    Overlap is *localised* - an interruption lasts a second or two inside a
+    much longer call - so a whole-clip average dilutes it into the noise floor.
+    Measured on the proxy set the global fraction correlated -0.09 with injected
+    overlap duration, i.e. not at all. The windowed maximum is what actually
+    carries the signal.
+    """
+    frac_global = _dual_pitch_fraction(fr, voiced)
+    win = max(4, int(win_s * SR / HOP))
+    if voiced.size <= win:
+        return frac_global, frac_global
+    best = 0.0
+    for s in range(0, voiced.size - win, max(1, win // 2)):
+        seg_v = voiced[s:s + win]
+        if seg_v.sum() < 4:
+            continue
+        best = max(best, _dual_pitch_fraction(fr[s:s + win], seg_v))
+    return frac_global, best
+
+
 def _dual_pitch_fraction(fr: np.ndarray, voiced: np.ndarray) -> float:
     """Fraction of voiced frames with a second, unrelated periodicity.
 
@@ -249,7 +293,8 @@ def _classify_noise(flat: float, centroid: float, snr_db: float) -> tuple[bool, 
 
 FEATURE_NAMES: tuple[str, ...] = (
     "snr_db", "noise_flatness", "noise_centroid_hz", "noise_centroid_log",
-    "dual_pitch_frac", "longest_silence_s", "silence_frac",
+    "dual_pitch_frac",
+    "longest_silence_s", "longest_speech_gap_s", "n_gaps_over_3s", "silence_frac",
     "speech_rolloff_hz", "speech_frac", "level_range_db",
     "energy_std_db", "spectral_flux_mean", "spectral_flux_std",
     "high_band_ratio", "clip_frac", "flat_top_frac", "zcr_mean",
@@ -296,13 +341,18 @@ def extract_features(path: str | Path) -> dict[str, float]:
     thr_sil = float(np.percentile(rms_db, 5)) + 8.0
     zcr = np.mean(np.abs(np.diff(np.sign(fr), axis=1)).mean(axis=1) / 2.0)
 
+    dp_global = _dual_pitch_fraction(fr, voiced)
+    gaps = _speech_gap_runs(voiced)
+
     return {
         "snr_db": float(snr_db),
         "noise_flatness": float(noise_flat),
         "noise_centroid_hz": float(noise_centroid),
         "noise_centroid_log": float(np.log10(max(noise_centroid, 1.0))),
-        "dual_pitch_frac": float(_dual_pitch_fraction(fr, voiced)),
+        "dual_pitch_frac": float(dp_global),
         "longest_silence_s": float(_longest_silence(rms_db, speech_db)),
+        "longest_speech_gap_s": float(gaps.max()) if gaps.size else 0.0,
+        "n_gaps_over_3s": float((gaps >= 3.0).sum()) if gaps.size else 0.0,
         "silence_frac": float((rms_db < thr_sil).mean()),
         "speech_rolloff_hz": rolloff,
         "speech_frac": float(voiced.mean()),

@@ -107,7 +107,7 @@ def main() -> int:
         if len(set(y[fit_m])) < 2:
             continue
         clf = LogisticRegression(max_iter=3000, class_weight="balanced",
-                                 C=0.5, multi_class="multinomial")
+                                 C=0.5)
         clf.fit(Xs[fit_m], y[fit_m])
         pred = clf.predict(Xs[ev_m])
         exact = float((pred == y[ev_m]).mean())

@@ -36,10 +36,11 @@ class FusionOutcome:
 def fuse(
     gemini: CallAnalysis | None,
     acoustic: AcousticResult | None,
+    prosody: Any = None,
     *,
     trust_llm_silence_veto: bool = True,
 ) -> FusionOutcome:
-    """Combine both paths into one result."""
+    """Combine the available paths into one result."""
     if gemini is None and acoustic is None:
         raise ValueError("fuse() needs at least one path")
 
@@ -47,8 +48,22 @@ def fuse(
     sources: dict[str, str] = {}
     out: dict[str, Any] = {}
 
-    # --- emotion: Path A only -------------------------------------------
-    if gemini is not None:
+    # --- emotion --------------------------------------------------------
+    # Path C (prosody) is authoritative when it has fitted coefficients. On the
+    # proxy eval split it reaches macro-F1 0.421 against 0.082 for the majority
+    # baseline, whereas Gemini is documented to read lexical content rather than
+    # delivery (arXiv:2510.10444) and returned `upset` for a flatly-delivered
+    # obscenity whose ground truth is `neutral`.
+    if prosody is not None and getattr(prosody, "tone_probs", None):
+        out["emotional_tone"] = prosody.emotional_tone
+        out["emotional_intensity"] = prosody.emotional_intensity
+        sources["emotional_tone"] = sources["emotional_intensity"] = "prosody"
+        if gemini is not None and gemini.emotional_tone != prosody.emotional_tone:
+            disagreements.append(
+                f"emotional_tone: gemini={gemini.emotional_tone!r} "
+                f"prosody={prosody.emotional_tone!r}"
+            )
+    elif gemini is not None:
         out["emotional_tone"] = gemini.emotional_tone
         out["emotional_intensity"] = gemini.emotional_intensity
         sources["emotional_tone"] = sources["emotional_intensity"] = "gemini"
