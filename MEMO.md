@@ -253,7 +253,7 @@ and the field is now served by pyannote `segmentation-3.0` (§4).
 
 | | balanced accuracy | correlation with true overlap |
 |---|---|---|
-| dual-pitch cue (before) | 0.577 | 0.069 |
+| dual-pitch cue, on the corrected labels | 0.544 | 0.069 |
 | **pyannote segmentation-3.0** | **0.792** (F1 0.789) | **0.388** |
 
 The lesson generalises past this field: **when a metric says a problem is
@@ -263,7 +263,7 @@ percentile bug and the silence threshold), which is exactly why I looked.
 
 **Acted-corpus optimism.** Tone thresholds are fitted on RAVDESS and CREMA-D. The
 SER literature is explicit that acted prosody exaggerates cues relative to
-spontaneous speech, so **0.421 macro-F1 is an optimistic bound** for real
+spontaneous speech, so **0.479 macro-F1 is an optimistic bound** for real
 dealership calls. The derived fields do not have this problem — their ground
 truth comes from my own degradation chain. Correct fix: MSP-Podcast (324 h
 naturalistic), whose request form would not clear inside this deadline.

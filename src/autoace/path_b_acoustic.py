@@ -501,7 +501,7 @@ def analyse_acoustics(path: str | Path) -> AcousticResult:
         res.speaker_overlap_present = bool(fitted["speaker_overlap_present"])
         res.long_silence_present = bool(fitted["long_silence_present"])
         # audio_quality deliberately does NOT use the fitted classifier: it
-        # reaches only 0.467 exact on the proxy eval split (chance is 0.33 on
+        # reaches only 0.472 exact on the proxy eval split (chance is 0.33 on
         # three classes) and called two genuinely-clear real calls
         # `severely_impaired`. The bandwidth rule below is kept instead. This is
         # a judgement call against n=3 and is flagged in the validation report.

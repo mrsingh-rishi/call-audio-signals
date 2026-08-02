@@ -69,7 +69,7 @@ def fuse(
 
     # --- emotion --------------------------------------------------------
     # Path C (prosody) is authoritative when it has fitted coefficients. On the
-    # proxy eval split it reaches macro-F1 0.421 against 0.082 for the majority
+    # proxy eval split it reaches macro-F1 0.479 against 0.082 for the majority
     # baseline, whereas Gemini is documented to read lexical content rather than
     # delivery (arXiv:2510.10444) and returned `upset` for a flatly-delivered
     # obscenity whose ground truth is `neutral`.

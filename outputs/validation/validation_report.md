@@ -230,7 +230,8 @@ Five specific defects, none of which were visible with three clips:
    overlap detector was being scored against noise.
 
    This is why the hand-built dual-pitch cue correlated **0.069** with "injected"
-   duration, why it sat at 0.577 balanced accuracy, and why the previous version
+   duration, why it sat at chance (0.577 as originally reported; 0.544 once the
+   labels were corrected), and why the previous version
    of this report concluded the field was *unsolved*. **It was not unsolved. The
    labels were wrong**, and a detector cannot beat a label that does not describe
    its audio.
