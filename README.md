@@ -113,8 +113,10 @@ a human-readable reason. A malformed file cannot fail a batch.
 
 ## Batch workflow
 
-Upload a ZIP (or several files) containing audio at the root plus a `labels.csv` manifest
-with `name` and `result_json` columns.
+Upload a **folder**, a **ZIP**, or a set of files — audio at the root plus a `labels.csv`
+manifest with `name` and `result_json` columns. Dropping a folder onto the page works too;
+nested directories are walked and flattened, and OS junk (`.DS_Store`, `__MACOSX`) is
+dropped before upload.
 
 1. **Pre-flight** runs before any processing and reports: files in the manifest that were
    not uploaded, files uploaded that are not in the manifest, unsupported extensions,
@@ -135,7 +137,8 @@ with `name` and `result_json` columns.
   finishes, or after `UPLOAD_RETENTION_HOURS` (default 24), whichever comes first.
 - Audio content is never logged. ffmpeg error text is scrubbed of server paths before it
   reaches results or the UI.
-- `LOCAL_ONLY=true` disables the Gemini path entirely for a zero-egress deployment.
+- `LOCAL_ONLY=true` disables the Gemini path entirely for a zero-egress deployment. Paths
+  B, C and D still run, so all nine fields are still produced — see [COMPLIANCE.md](COMPLIANCE.md).
 - Secrets are reported only through `config.redacted_summary()`, which returns presence,
   never values.
 
@@ -151,11 +154,17 @@ docker run -p 8000:8000 --env-file .env autoace-vt
 **Render:** [`render.yaml`](render.yaml) is a Blueprint. Set `GEMINI_API_KEY` and
 `APP_PASSWORD` in the dashboard; `SESSION_SECRET` is generated.
 
-Sizing is measured, not assumed: **peak RSS is 60 MB** processing a 5-file batch including
-a 172 s clip, so the `starter` plan (512 MB) has roughly 8× headroom. Free tier is
-deliberately *not* used — it spins down after 15 minutes with a ~60 s cold start, which
-conflicts with the brief's requirement that the deployment stay available throughout the
-evaluation period.
+Sizing is measured, not assumed. Peak RSS on the 172 s clip through all four paths is
+**332 MB** against the 512 MiB (536.9 MB) instance limit, so `MAX_CONCURRENCY` is **1** —
+two of those in flight would exceed it. Full breakdown in
+[`latency_analysis.md`](outputs/validation/latency_analysis.md).
+
+The live instance runs on Render's **free** plan, which spins down after 15 minutes idle
+(~31 s cold start, measured). An external keep-alive pings `/api/health` every 10 minutes
+so it stays warm through the evaluation period. That is a workaround, not a fix: the free
+plan also allocates 0.1 CPU, which is why per-clip latency on the deployment is far worse
+than locally. `plan: starter` ($7/mo, 0.5 CPU) fixes both and is a one-line change in
+[`render.yaml`](render.yaml).
 
 ## Findings
 
