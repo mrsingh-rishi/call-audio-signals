@@ -6,10 +6,14 @@
 # 512 MB instance, so the deployment does not need a 2 GB tier.
 FROM python:3.12-slim
 
-# ffmpeg does all decoding, downmixing and resampling. curl is used once, at
-# build time, to fetch the segmentation model.
+# ffmpeg does all decoding, downmixing and resampling. curl and bzip2 are used
+# once, at build time, to fetch and unpack the segmentation model.
+#
+# bzip2 is NOT in python:3.12-slim and `tar xjf` shells out to it, so omitting it
+# fails the build with "bzip2: Cannot exec: No such file or directory" - which is
+# exactly how the first deploy of this Dockerfile died.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg curl ca-certificates \
+ && apt-get install -y --no-install-recommends ffmpeg curl ca-certificates bzip2 \
  && rm -rf /var/lib/apt/lists/*
 
 ENV PYTHONUNBUFFERED=1 \
