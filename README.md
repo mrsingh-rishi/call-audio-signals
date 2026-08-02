@@ -199,7 +199,7 @@ limitations section) but not shipped — cost per audio-minute is flat in durati
 buys nothing at current clip lengths.
 
 **Known weak fields**, reported rather than hidden: `emotional_tone` carries an
-acted-corpus optimism bias, and `audio_quality` is 0.467 exact on the proxy eval split.
+acted-corpus optimism bias, and `audio_quality` is 0.472 exact on the proxy eval split.
 Both are quantified in the validation report. Accuracy is measured on the proxy set, never
 tuned against the three provided labels — thresholds that scored 3/3 on those three calls
 scored 3/16 on the proxy set, which is what motivated building it.

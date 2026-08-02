@@ -195,7 +195,7 @@ Five specific defects, none of which were visible with three clips:
    as loud as speech, the VAD marks noisy frames as *speech*, the "non-speech"
    region empties, and the loudest clips scored as having no noise. Replaced with
    **minimum-statistics** noise estimation, which needs no speech/non-speech
-   decision. `background_noise_present` went to 0.911 balanced accuracy.
+   decision. `background_noise_present` went to 0.920 balanced accuracy.
 
 2. **The silence detector thresholded below the codec noise floor.** A fixed
    −35 dB below a −47 dBFS speech level puts the threshold at −82 dBFS, but
