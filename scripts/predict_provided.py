@@ -18,7 +18,6 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from autoace.config import COST_CEILING_PER_AUDIO_MIN, REPO_ROOT, get_settings  # noqa: E402
-from autoace.ingest import AudioIngestError, probe  # noqa: E402
 from autoace.metrics import format_report, score_batch  # noqa: E402
 from autoace.predict import analyse_file  # noqa: E402
 
@@ -94,7 +93,7 @@ def main(argv: list[str] | None = None) -> int:
                   f"dual_pitch={res.acoustic_metrics.get('dual_pitch_frac')} "
                   f"snr={res.acoustic_metrics.get('snr_db')}dB")
         if res.sources:
-            print(f"  field authority: "
+            print("  field authority: "
                   + ", ".join(f"{k}={v}" for k, v in res.sources.items()
                               if v not in ("gemini", "acoustic"))
                   or "  field authority: default")

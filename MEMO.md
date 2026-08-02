@@ -291,15 +291,29 @@ calls over ~10 minutes, and any hidden-set format other than the three tested.
 ## 7. Next steps, in order of expected value
 
 1. **Dual-channel recording export** — removes the hardest constraint entirely.
+   Overlap becomes a cross-channel energy computation and customer isolation
+   becomes exact. Still the single highest-value change available, and it is on
+   the recording side rather than the model side.
 2. **Label 200–500 real calls with 3 annotators**, and report inter-annotator
    agreement. Human agreement on 5-class tone is typically the real ceiling; we
-   currently have no idea what it is here.
-3. **Replace the overlap heuristic** with a trained overlapped-speech model.
-4. **Refit tone on in-domain audio** once real labels exist; the acted-corpus
-   bias is the largest known error source.
-5. **Per-field confidence calibration** against real labels. `confidence` is
-   currently a fused agreement score; the provided labels ship a constant 0.82
-   placeholder, so it cannot be calibrated against them.
+   currently have no idea what it is here. This also unblocks 3 and 4.
+3. **Refit tone on in-domain audio** once real labels exist. The acted-corpus
+   bias is the largest known error source, and §5 shows prior correction alone
+   cannot fix it — the correction needs a real target distribution to aim at.
+4. **Per-field confidence calibration** against real labels. `confidence` now
+   folds in Path C's posterior, which is shown in the validation report to track
+   correctness (+0.213 correlation, well-calibrated by tercile), but the provided
+   labels ship a constant 0.82 placeholder so it cannot be calibrated on them.
+5. **Audit the proxy generator's remaining axes the way §6 audited overlap.**
+   Two of the four label defects found in this project were the generator writing
+   labels that did not describe its own audio, and both went undetected until
+   something else forced a look. `audio_quality` — 0.472 exact, the weakest field
+   — is defined by my own invented degradation severities and is the obvious next
+   candidate.
+
+**Done since the previous draft:** replacing the overlap heuristic with a trained
+overlapped-speech model, which was item 3 on this list. It is §6's story: the
+model helped, and finding out *why* it helped mattered more.
 
 ---
 

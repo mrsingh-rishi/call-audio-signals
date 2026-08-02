@@ -121,7 +121,7 @@ def main() -> int:
     f1 = 2 * prec * rec / max(prec + rec, 1e-9)
     baseline = _balanced_acc(y[ev_m], np.ones_like(y[ev_m], dtype=bool))
 
-    print(f"\n=== EVAL SPLIT (unseen speakers) ===")
+    print("\n=== EVAL SPLIT (unseen speakers) ===")
     print(f"  balanced accuracy  {bal:.3f}   (Path B dual-pitch scores 0.544 on these same "
           f"labels, baseline {baseline:.3f})")
     print(f"  precision {prec:.3f}  recall {rec:.3f}  F1 {f1:.3f}")
