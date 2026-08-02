@@ -3,7 +3,9 @@
 Classifies emotional tone and detects background noise / technical audio issues in
 production call recordings, emitting the nine-field JSON contract defined in the trial brief.
 
-**Hosted dashboard:** _(URL and credentials supplied separately — see Deploy below)_
+**Hosted dashboard:** <https://autoace-voice-tone.onrender.com>
+Sign in with the `APP_USER` / `APP_PASSWORD` credentials supplied with the submission
+(not committed to this repository). See [Deploy](#deploy) to run your own instance.
 
 ---
 
@@ -13,9 +15,14 @@ Requires Python 3.11+ and `ffmpeg` on PATH.
 
 ```bash
 git clone <repo> && cd autoace-voice-tone
-uv venv --python 3.12 && uv pip install -e ".[server,gemini,dev]"
+uv venv --python 3.12 && uv pip install -e ".[server,gemini,overlap,dev]"
+./scripts/fetch_model.sh  # 5.7 MB speaker-segmentation checkpoint for Path D
 cp .env.example .env      # then fill in GEMINI_API_KEY, APP_PASSWORD, SESSION_SECRET
 ```
+
+> `fetch_model.sh` is optional. Without it Path D reports itself unavailable and
+> `speaker_overlap_present` falls back to Path B's weaker cue rather than failing.
+> The Docker image runs the equivalent step at build time.
 
 > **The Gemini key must be paid-tier.** Free-tier content is used to improve Google's
 > products, which conflicts with the confidentiality constraint in the brief. See
@@ -72,13 +79,27 @@ prompts. They cannot drift apart.
 ## Architecture
 
 ```
-audio ──► ingest.py ──► path_a_gemini.py ──► coerce_to_schema ──► 9-field JSON
-          (probe,        (one call, evidence-      (repairs,        + latency
-           level-         ordered schema,           never raises)    + measured cost
-           preserving     thinking off)
-           downmix,
-           normalise)
+                 ┌─► path_a_gemini.py   tone evidence, noise NAMING, silence veto
+                 │     (1 API call, evidence-ordered schema, thinking off)
+                 ├─► path_b_acoustic.py noise presence/severity, quality, silence
+audio ─► ingest ─┤     (numpy + ffmpeg, no weights)
+                 ├─► path_c_prosody.py  emotional_tone, emotional_intensity
+                 │     (26 prosodic features -> logistic regression, 8.8 KB JSON)
+                 └─► path_d_overlap.py  speaker_overlap_present
+                       (pyannote segmentation-3.0, ONNX, 5.7 MB, MIT)
+                                  │
+                                  ▼
+                          fusion.py  per-field authority
+                                  │
+                                  ▼
+                    9-field JSON + latency + measured cost
 ```
+
+**Authority is assigned per field from measured capability**, not from a general
+preference for one path. Gemini reads words rather than voice, so it does not own
+tone; it does own naming the noise source, which spectral shape can only
+approximate. Paths B, C and D never see a transcript, so they are structurally
+incapable of the field conflation the brief warns about.
 
 **Evidence-ordered schema.** The response schema declares `noise_evidence`,
 `quality_evidence`, `customer_identification` and `emotion_evidence` *before* any label.
@@ -154,6 +175,10 @@ Measured, reproducible results that shaped the design:
 | `src/autoace/ingest.py` | Probe, decode, channel analysis, canonical normalisation |
 | `src/autoace/forensics.py` | Reproducible measurement CLI |
 | `src/autoace/path_a_gemini.py` | Gemini analysis, prompts, token/cost accounting |
+| `src/autoace/path_b_acoustic.py` | Deterministic DSP: noise, quality, silence |
+| `src/autoace/path_c_prosody.py` | 26 prosodic features + logistic regression for tone |
+| `src/autoace/path_d_overlap.py` | pyannote segmentation-3.0 (ONNX) for speaker overlap |
+| `src/autoace/fusion.py` | Per-field authority rules between the four paths |
 | `src/autoace/predict.py` | Orchestrator; guarantees per-file isolation |
 | `src/autoace/transcript.py` | Role-labelled turns, timestamp repair |
 | `src/autoace/metrics.py` | Scoring: macro-F1, ordinal off-by-one, confusion matrices |
@@ -163,11 +188,18 @@ Measured, reproducible results that shaped the design:
 
 ## Status
 
-Working and verified end-to-end: forensics, prediction, batch pipeline, dashboard,
-live scoring, downloads, failure isolation, cost and latency measurement.
+**Built and verified end-to-end:** forensics, all analysis paths, fusion, the batch
+pipeline, the dashboard with live scoring and downloads, per-file failure isolation, and
+cost/latency measurement. The 500-clip proxy validation set, the B0 majority baseline and
+the technical memo are complete — see [MEMO.md](MEMO.md) and
+[validation_report.md](outputs/validation/validation_report.md).
 
-**Not yet built:** the synthetic proxy validation set, the deterministic Path B, the
-B0/B1 baselines, long-call windowing, and the technical memo. Current accuracy against
-the three provided labels is poor and has known systematic causes — see
-[t0_probe_findings.md](outputs/validation/t0_probe_findings.md). Those fixes must be
-validated on the proxy set rather than tuned against n=3.
+**Deliberately not built:** long-call windowing. It is designed (see the memo's
+limitations section) but not shipped — cost per audio-minute is flat in duration, so it
+buys nothing at current clip lengths.
+
+**Known weak fields**, reported rather than hidden: `emotional_tone` carries an
+acted-corpus optimism bias, and `audio_quality` is 0.467 exact on the proxy eval split.
+Both are quantified in the validation report. Accuracy is measured on the proxy set, never
+tuned against the three provided labels — thresholds that scored 3/3 on those three calls
+scored 3/16 on the proxy set, which is what motivated building it.

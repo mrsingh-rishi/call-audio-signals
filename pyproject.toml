@@ -22,15 +22,11 @@ server = [
 gemini = [
     "google-genai>=1.0",
 ]
-# Path B, lean subset that ships in the container: VAD via ONNX, no torch.
-acoustic-lean = [
+# Path D (speaker overlap). onnxruntime only - no torch. The pyannote
+# segmentation-3.0 checkpoint is a 7 MB ONNX file baked into the image at build
+# time, so the container gains ~50 MB of runtime and no model download at boot.
+overlap = [
     "onnxruntime>=1.18",
-]
-# Path B, full: adds TorchAudio-SQUIM. Container-heavy - see plan section 8.
-acoustic-full = [
-    "torch>=2.4",
-    "torchaudio>=2.4",
-    "soundfile>=0.12",
 ]
 # Proxy set construction and validation. Never shipped to the container.
 research = [

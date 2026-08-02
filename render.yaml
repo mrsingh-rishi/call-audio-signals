@@ -35,19 +35,22 @@ services:
         value: autoace
       - key: GEMINI_MODEL
         value: gemini-2.5-flash-lite
-      - key: GEMINI_MODEL_FALLBACK
-        value: gemini-3.1-flash-lite
       - key: GEMINI_THINKING_BUDGET
         value: "0"
       - key: LOCAL_ONLY
         value: "false"
       - key: UPLOAD_RETENTION_HOURS
         value: "24"
-      # 2, not 4: a 172-second clip peaks around 286 MB during analysis and the
-      # instance limit is 512 MiB. The service was OOM-killed at concurrency 4
-      # before the memory work below (chunked features, float32 frames, batched
-      # F0 FFT) brought the peak down from 637 MB.
+      # 1, not 4: a 172-second clip peaks at 332 MB through all four paths and
+      # the instance limit is 512 MiB (536.9 MB), so two of them in flight can
+      # exceed it. The service was already OOM-killed once at concurrency 4,
+      # before the memory work (single-pass features, float32 frames, batched F0
+      # FFT, no ONNX arena) brought the peak down from 637 MB.
+      #
+      # Throughput barely suffers: the free plan allocates 0.1 CPU and Paths B/C/D
+      # are CPU-bound, so extra concurrency mostly queues on the same core. On a
+      # larger instance raise this together with the memory, not on its own.
       - key: MAX_CONCURRENCY
-        value: "2"
+        value: "1"
       - key: PYTHONUNBUFFERED
         value: "1"

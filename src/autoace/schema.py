@@ -307,8 +307,18 @@ def gemini_response_schema(include_evidence: bool = True) -> dict[str, Any]:
         for name, desc in (
             (
                 "noise_evidence",
-                "Non-speech sounds you can hear in the background. Describe ONLY sounds, "
-                "not signal degradation and not emotion. Empty string if none.",
+                "Every non-speech sound you can hear behind or between the speech, "
+                "INCLUDING faint ones. Describe ONLY sounds, not signal degradation and "
+                "not emotion. Write 'nothing audible' only if the background is truly "
+                "silent. Describing a faint sound here does NOT commit you to calling "
+                "background_noise_present true - that judgement comes after.",
+            ),
+            (
+                "noise_source",
+                "The dominant background sound named in one to three words - for example "
+                "'television', 'office chatter', 'road noise', 'keyboard typing', "
+                "'static', 'music', 'wind'. Name it even when it is faint. Empty string "
+                "only if nothing at all is audible.",
             ),
             (
                 "quality_evidence",

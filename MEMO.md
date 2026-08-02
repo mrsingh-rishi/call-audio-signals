@@ -18,8 +18,8 @@ of the three calls happens to be `neutral`. A constant and a working classifier
 are indistinguishable at n=3.
 
 So the first substantial thing I built was not a model. It was a **500-clip
-synthetic validation set whose labels are known by construction**, with 115
-speakers split disjointly, and every metric in this memo comes from its
+synthetic validation set whose labels are known by construction**, drawn from a
+115-speaker pool of which 102 appear in the set (61 fit / 41 eval, disjoint), and every metric in this memo comes from its
 evaluation split. The three provided calls are used only as a sanity check and
 are reported as raw agreement, explicitly labelled "n=3, not a metric".
 
@@ -59,7 +59,10 @@ That turned out to be exploitable — see §4.
 
 ## 3. Approaches tested
 
-The brief asks for at least two materially different approaches. There are three.
+The brief asks for at least two materially different approaches. There are four,
+and they are genuinely different in kind: an audio foundation model, hand-written
+signal processing, a fitted classifier over prosodic features, and a purpose-built
+neural segmentation model. Each owns the fields it measurably wins.
 
 ### Path A — Gemini audio foundation model
 
@@ -90,6 +93,23 @@ numpy + ffmpeg, no model weights. Noise estimated by **minimum statistics**
 (per-bin running minimum), speech/non-speech structure from an adaptive VAD,
 clipping by run-length, gaps by speech-absence runs.
 
+### Path D — pyannote segmentation-3.0 for overlapped speech
+
+Added after the diagnosis in §6 showed the field was tractable. A **5.7 MB ONNX
+export**, CPU-only through onnxruntime, no torch and nothing fetched at boot —
+the checkpoint is baked into the image at build time.
+
+**Licence is why this one is usable and the speech-emotion candidates are not.**
+`pyannote/segmentation-3.0` is **MIT** (© 2022 CNRS). The two strongest
+dimensional-SER models are not: audEERING's MSP-dim is CC-BY-NC-SA-4.0 and
+emotion2vec+ is restricted by its training data. Fine for a demo, not for the
+product this is a trial for.
+
+The network emits a powerset over 3 speakers with at most 2 concurrent, so
+overlap is simply `argmax(frame) >= 4` — no threshold tuning in reading the
+model. The one fitted parameter is how much overlap counts as "enough to affect
+understanding", the brief's wording, chosen on the fit split.
+
 ### Path C — prosodic features + lightweight classifier
 
 The brief names "acoustic features plus a lightweight classifier" as a valid
@@ -116,11 +136,11 @@ Authority is assigned per field from **measured capability**, not preference.
 
 | field | source | why |
 |---|---|---|
-| `emotional_tone`, `emotional_intensity` | **Path C** | macro-F1 0.421 vs 0.082 for majority baseline; Path A reads lexical content |
+| `emotional_tone`, `emotional_intensity` | **Path C** | macro-F1 0.479 vs 0.082 for majority baseline; Path A reads lexical content |
 | `background_noise_*` | **Path B** | Path A wrote "faint hiss" then labelled it absent |
 | `background_noise_type` | Path B presence + Path A naming | Gemini names sources ("television") that spectral shape only approximates |
 | `audio_quality` | **Path B** | Path A pins `slightly_impaired`, mistaking the synthetic agent voice for a defect |
-| `speaker_overlap_present` | Path B | Path A returns `false` universally — but see §6, this field is unsolved |
+| `speaker_overlap_present` | **Path D** | pyannote `segmentation-3.0`: 0.792 balanced accuracy vs 0.544 for the hand-built cue, same labels and split. Path A returns `false` universally |
 | `long_silence_present` | Path B, Path A may veto | the brief scopes it to silence "indicating a call-flow problem" — a semantic judgement |
 
 **TTS/human separation.** Since the agent is synthetic, prosodic features are
@@ -140,8 +160,8 @@ structurally rather than by instruction.
 
 ## 5. Validation
 
-**Proxy set:** 500 clips · 115 speakers · **fit 271 / eval 229, speakers
-disjoint** · noise files split disjointly · babble built only from fitting-split
+**Proxy set:** 500 clips · 102 speakers from a 115-speaker pool · **fit 271 / eval
+229, speakers disjoint (61 / 41)** · noise files split disjointly · babble built only from fitting-split
 speakers · all seeds logged. Degradation axes: noise SNR {∞,30,20,15,10,5,0} ·
 quality defects applied *independently* of noise · overlap {0,1.5,4}s · silence
 {0,2,5,12}s · three container chains · concatenated multi-utterance bases.
@@ -155,21 +175,52 @@ predicts exactly that failure for audio LLMs.
 
 | field | metric | result | baseline |
 |---|---|---|---|
-| `emotional_tone` | macro-F1 | **0.421** | 0.082 (B0 majority) |
-| `emotional_tone` | accuracy | 0.428 | 0.258 |
-| `emotional_intensity` | macro-F1 | 0.434 | 0.254 |
-| `background_noise_present` | balanced acc | **0.916** (F1 0.935) | 0.603 |
-| `background_noise_severity` | exact / within-1 | 0.690 / **0.934** | — |
-| `audio_quality` | exact / within-1 | 0.467 / 0.769 | — |
-| `speaker_overlap_present` | balanced acc | **0.577** | 0.524 |
-| `long_silence_present` | balanced acc | **0.747** | 0.633 |
+| `emotional_tone` | macro-F1 | **0.479** | 0.082 (B0 majority) |
+| `emotional_tone` | accuracy | 0.493 | 0.258 |
+| `emotional_intensity` | macro-F1 | 0.449 | 0.254 |
+| `background_noise_present` | balanced acc | **0.920** (F1 0.939) | 0.603 |
+| `background_noise_severity` | exact / within-1 | 0.703 / **0.930** | — |
+| `audio_quality` | exact / within-1 | 0.472 / 0.782 | — |
+| `speaker_overlap_present` | balanced acc | **0.792** (F1 0.789) | 0.520 |
+| `long_silence_present` | balanced acc | **0.773** (F1 0.711) | 0.633 |
 
-**Per-class F1 for `emotional_tone`:** upset 0.600 · neutral 0.505 · satisfied
-0.393 · distressed 0.358 · **frustrated 0.250**.
+**Per-class F1 for `emotional_tone`:** upset 0.653 · neutral 0.639 · satisfied
+0.430 · distressed 0.379 · **frustrated 0.295**.
+
+> **These are not comparable to the numbers in an earlier draft of this memo.**
+> The proxy set was regenerated after the label defect in §6 was found, so the
+> evaluation clips are different audio. The tone figures moved 0.421 → 0.479, and
+> almost none of that is a better model — see the ablation immediately below.
 
 `frustrated` being worst was predicted before the experiment: it has no clean
 acted analogue and is approximated from low-intensity anger and disgust. Per-class
 F1 is reported precisely so this is visible rather than buried in an average.
+
+### Prior correction: implemented, measured, and it does almost nothing
+
+Acted corpora are balanced; real call audio is overwhelmingly neutral. That is a
+textbook prior shift, and the textbook fix is **logit adjustment** — add
+`τ·log π_target` to each class logit, which for a logistic regression is a
+per-class offset on the intercept and costs nothing at inference.
+
+τ is chosen on **held-out speakers inside the fit split**, never on the eval
+split and never on the three provided calls. The result:
+
+| field | τ chosen | eval macro-F1 at τ=0 | at chosen τ | delta |
+|---|---|---|---|---|
+| `emotional_tone` | 0.10 | 0.477 | 0.479 | **+0.002** |
+| `emotional_intensity` | 0.00 | 0.449 | 0.449 | **+0.000** |
+
+**This is a negative result and I am reporting it as one.** It is also the
+expected one: the proxy set *is* the acted, balanced distribution, so shifting
+toward a spontaneous prior cannot help on it. For intensity the search chose
+τ=0 — the correction switched itself off rather than being switched off by me.
+
+The mechanism is worth shipping anyway, because it is the correct lever and it
+is now a one-number change: if AutoAce can supply the real tone distribution
+across their calls, `DEPLOY_TONE_PRIOR` and τ are where it goes, with no
+retraining. What cannot be done is *validating* that setting against acted data,
+so the prior in the code is flagged as an estimate rather than a measurement.
 
 **Leakage prevention:** grouped by speaker; no source clip in both splits under
 any degradation; noise files disjoint; scaler statistics computed on the fit
@@ -179,13 +230,36 @@ split only; sklearn used for fitting only, never shipped.
 
 ## 6. Failure modes and limitations
 
-**`speaker_overlap_present` is unsolved.** Balanced accuracy 0.577 against a
-0.524 baseline — effectively chance. The dual-pitch detector fires on ~80% of
-single-speaker windows, and the correlation between injected overlap duration and
-the feature is **0.069**. I tried a windowed maximum to catch localised overlap;
-it did not help. I am reporting this rather than shipping a field that looks
-functional and is not. Next step: a proper overlapped-speech model
-(pyannote `segmentation-3.0` powerset) rather than a hand-built cue.
+**`speaker_overlap_present` was not unsolved — my labels were wrong.** This is
+the finding I would most want to be asked about.
+
+The field sat at 0.577 balanced accuracy against a 0.524 baseline, and the
+correlation between injected overlap duration and the dual-pitch feature was
+**0.069**. I had written it off as a hard modelling problem. It was not. My
+proxy generator placed the interrupting talker at a **uniformly random offset**,
+but the concatenated bases are only ~42% voiced, so the interrupter usually
+landed in a pause and overlapped nothing. Measured over 40 placements per
+condition: a **1.5 s** requested overlap produced a median of **0.28 s** of real
+two-voice time and cleared the 0.5 s label threshold in **8%** of draws; a
+**4.0 s** request produced **0.46 s** and cleared it **42%** of the time.
+
+So most clips labelled `speaker_overlap_present=true` contained less overlap
+than the generator's own definition required. Every detector was being scored
+against noise, and no detector can beat a label that does not describe its audio.
+
+Two changes fixed the generator — place the interrupter on voiced speech, and
+derive the label by **measuring** the result instead of trusting the request —
+and the field is now served by pyannote `segmentation-3.0` (§4).
+
+| | balanced accuracy | correlation with true overlap |
+|---|---|---|
+| dual-pitch cue (before) | 0.577 | 0.069 |
+| **pyannote segmentation-3.0** | **0.792** (F1 0.789) | **0.388** |
+
+The lesson generalises past this field: **when a metric says a problem is
+unsolvable, check that the labels describe the audio before believing it.** The
+same class of defect had already bitten this project twice (the `mix_noise`
+percentile bug and the silence threshold), which is exactly why I looked.
 
 **Acted-corpus optimism.** Tone thresholds are fitted on RAVDESS and CREMA-D. The
 SER literature is explicit that acted prosody exaggerates cues relative to
@@ -235,7 +309,7 @@ Full detail in [`outputs/validation/cost_analysis.md`](outputs/validation/cost_a
 [`latency_analysis.md`](outputs/validation/latency_analysis.md) and
 [`COMPLIANCE.md`](COMPLIANCE.md).
 
-**Cost: $0.000849 per audio-minute — 3.5× under the $0.003 ceiling.** Measured
+**Cost: $0.000875 per audio-minute — 3.4× under the $0.003 ceiling.** Measured
 from live `usageMetadata`, not estimated. Paths B and C are $0. Reported
 *uncached*: implicit caching made repeated benchmark runs look 3.5× cheaper, and
 quoting that number would have been misleading.
@@ -254,6 +328,8 @@ chunk rather than by duration.
 
 **Privacy:** paid Gemini tier only — free tier trains on submitted content and
 would breach the confidentiality constraint. Audio deleted on batch completion or
-after 24 h. Never logged. `LOCAL_ONLY=true` runs Paths B and C with **zero data
-egress**, which now produces real analysis rather than merely disabling the
-system.
+after 24 h. Never logged. `LOCAL_ONLY=true` runs Paths B, C and D with **zero
+data egress** and still produces all nine fields; it loses only Gemini's semantic
+customer identification and its naming of the noise source. Path D's weights are
+MIT-licensed and baked into the image, so the zero-egress mode needs no network
+at all — not even at startup.

@@ -43,19 +43,35 @@ ORDINAL_FIELDS = {
 }
 
 
+def _manifest_key(rows: list[dict]) -> str:
+    """Identify this build of the proxy set.
+
+    Clip names carry a spec fingerprint, so hashing the name list changes
+    whenever the set is regenerated. Validating only the row COUNT - which is
+    what this used to do - silently reused features from the previous build
+    after a regeneration produced 500 different clips, and the fitted
+    coefficients were then scored against audio they had never seen.
+    """
+    import hashlib
+
+    return hashlib.sha256("|".join(r["name"] for r in rows).encode()).hexdigest()[:16]
+
+
 def build_features(force: bool = False) -> tuple[np.ndarray, list[dict]]:
     rows = list(csv.DictReader((PROXY / "labels.csv").open(newline="")))
+    key = _manifest_key(rows)
     if CACHE.exists() and not force:
         d = np.load(CACHE, allow_pickle=True)
-        if len(d["X"]) == len(rows):
+        if len(d["X"]) == len(rows) and str(d.get("key", "")) == key:
             return d["X"], rows
+        print("  proxy set changed since the cache was written; recomputing features")
     X = []
     for i, r in enumerate(rows):
         X.append([extract_features(PROXY / "audio" / r["name"])[k] for k in FEATURE_NAMES])
         if (i + 1) % 50 == 0:
             print(f"  features {i + 1}/{len(rows)}")
     X = np.asarray(X, dtype=np.float64)
-    np.savez_compressed(CACHE, X=X)
+    np.savez_compressed(CACHE, X=X, key=key)
     return X, rows
 
 

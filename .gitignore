@@ -31,6 +31,9 @@ uploads/
 # Model weights (baked at image build, not committed)
 models/
 
+# Local editor/agent scratch
+.claude/
+
 # OS
 .DS_Store
 data/transcripts/

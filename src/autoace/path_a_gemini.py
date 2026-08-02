@@ -96,9 +96,15 @@ noise_evidence WITHOUT reference to signal degradation. Describe signal defects 
 quality_evidence WITHOUT reference to background sounds. These are scored separately
 and must not be conflated.
 
-Your labels must agree with your own evidence. If noise_evidence describes an audible
-sound, background_noise_present must be true and the severity must not be none. If it
-describes nothing, background_noise_present must be false."""
+Report what you hear first, judge it second. Fill noise_evidence and noise_source with
+everything audible in the background INCLUDING faint sounds - naming a faint sound there
+does not oblige you to set background_noise_present true. Then apply the brief's bar for
+the boolean: barely perceptible artifacts do not automatically count as background noise,
+but anything clearly audible does, and when it is true the severity must not be none.
+
+An earlier version of this instruction tied the two together in both directions. The
+effect was that the model went silent about faint hiss rather than describe a sound it
+was about to label absent, which destroyed the evidence trail. Describe first."""
 
 
 @dataclass
@@ -242,7 +248,7 @@ def analyse_single(
     # contract. Strip them before coercion so they are not reported as schema
     # repairs - otherwise every successful call looks like it had four errors.
     evidence_keys = (
-        "noise_evidence", "quality_evidence",
+        "noise_evidence", "noise_source", "quality_evidence",
         "customer_identification", "emotion_evidence",
     )
     evidence = {k: raw[k] for k in evidence_keys if k in raw}

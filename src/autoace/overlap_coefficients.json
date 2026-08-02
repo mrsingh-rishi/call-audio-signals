@@ -1,0 +1,8 @@
+{
+  "min_overlap_s": 0.01,
+  "fitted_on": "proxy fit split (271 clips, speakers disjoint from eval)",
+  "eval_balanced_accuracy": 0.7918,
+  "eval_f1": 0.7895,
+  "eval_correlation_injected_vs_detected": 0.3881,
+  "model": "pyannote/segmentation-3.0 (MIT), ONNX export via k2-fsa"
+}

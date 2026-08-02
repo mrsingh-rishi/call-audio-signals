@@ -511,7 +511,18 @@ def analyse_acoustics(path: str | Path) -> AcousticResult:
             res.background_noise_severity = "none"
         else:
             if not res.background_noise_type:
-                res.background_noise_type = "background noise"
+                # The fitted detector says noise is present while the flatness
+                # rule reads the band as silent. Rather than emit the literal
+                # string "background noise" - which scores zero against any real
+                # label - name it from spectral character anyway. A broadband
+                # floor is hiss/static; a low-centroid one is line noise.
+                res.background_noise_type = (
+                    "static" if centroid > 1000 else "line noise"
+                )
+                res.notes.append(
+                    f"type below the flatness floor (flat={flat:.3f}); "
+                    f"named from centroid {centroid:.0f} Hz"
+                )
             if res.background_noise_severity == "none":
                 res.background_noise_severity = "low"
         res.notes.append("fitted detectors (proxy-set coefficients)")

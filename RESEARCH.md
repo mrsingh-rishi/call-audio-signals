@@ -279,6 +279,35 @@ came from measurement rather than from a bigger model.
 
 ---
 
+## 7b. What the licence filter actually bought — a specialist where one exists
+
+The licence column killed the *emotion* models. It did not kill the *overlap*
+model, and that turned out to matter more.
+
+`pyannote/segmentation-3.0` is **MIT** (© 2022 CNRS), ships as a **5.7 MB ONNX**
+export maintained by k2-fsa, and runs on CPU with no torch. That combination —
+permissive licence, small enough for a 512 MB instance, no gated download — is
+rare enough that it decided the architecture:
+
+| candidate | task | size | licence | usable here |
+|---|---|---|---|---|
+| audEERING MSP-dim | emotion (A/D/V) | ~0.2 B | CC-BY-NC-SA-4.0 | ❌ non-commercial |
+| emotion2vec+ large | emotion (9-class) | ~300 M | training-data restricted | ❌ |
+| **pyannote segmentation-3.0** | **overlapped speech** | **5.7 MB ONNX** | **MIT** | ✅ **shipped** |
+
+**The generalisable lesson is not about licences, though.** I had recorded
+`speaker_overlap_present` as "unsolved, needs a proper model". When I finally
+attached the proper model, it exposed that the field's *labels* were wrong — my
+generator was placing the interrupting talker into silent gaps, so most clips
+marked as containing overlap contained almost none (validation report §5.4).
+
+The detector was never the bottleneck. **The measurement was.** Reaching for a
+stronger model is what surfaced that, but the fix that mattered was in the
+generator, and the model only earned its 0.792 balanced accuracy once the labels
+described the audio.
+
+---
+
 ## 8. Sources
 
 ### Read in full
@@ -295,6 +324,15 @@ came from measurement rather than from a bigger model.
   https://huggingface.co/audeering/wav2vec2-large-robust-12-ft-emotion-msp-dim
 - **TorchAudio pipelines / SQUIM** —
   https://docs.pytorch.org/audio/stable/pipelines.html
+- **`pyannote/segmentation-3.0` model card** (powerset over 3 speakers, max 2
+  concurrent; MIT, © 2022 CNRS) —
+  https://huggingface.co/pyannote/segmentation-3.0
+- **sherpa-onnx speaker-segmentation model release** (the ONNX export actually
+  shipped; 5.7 MB, no HF token needed) —
+  https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-segmentation-models
+- **Menon et al., "Long-tail learning via logit adjustment"** — the
+  `f_y(x) − τ·log π_y` correction applied to Path C for the acted-to-spontaneous
+  prior shift — https://arxiv.org/abs/2007.07314
 
 ### Read abstract, results or model card
 

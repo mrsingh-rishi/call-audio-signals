@@ -78,12 +78,20 @@ class DegradationSpec:
     quality_ops: list[str] = field(default_factory=list)
     overlap_s: float = 0.0
     overlap_file: str = ""
+    # Two-voice time actually achieved, filled in by `degrade()`. The label is
+    # derived from THIS, not from `overlap_s`, because a requested overlap that
+    # lands in a pause overlaps nothing. See `inject_overlap`.
+    actual_overlap_s: float = 0.0
     silence_s: float = 0.0
     format_chain: str = "opus48_dupstereo"
     adversarial_cell: str = ""
 
     def fingerprint(self) -> str:
-        return hashlib.sha256(json.dumps(asdict(self), sort_keys=True).encode()).hexdigest()[:12]
+        # `actual_overlap_s` is an OUTPUT of the chain, not an input to it, so it
+        # is excluded: the fingerprint must identify the recipe, and must be
+        # computable before the audio is rendered.
+        d = {k: v for k, v in asdict(self).items() if k != "actual_overlap_s"}
+        return hashlib.sha256(json.dumps(d, sort_keys=True).encode()).hexdigest()[:12]
 
 
 def ground_truth(spec: DegradationSpec, tone: str, intensity: str) -> dict:
@@ -103,7 +111,7 @@ def ground_truth(spec: DegradationSpec, tone: str, intensity: str) -> dict:
         "background_noise_type": spec.noise_class if present else "",
         "background_noise_severity": severity,
         "audio_quality": quality,
-        "speaker_overlap_present": spec.overlap_s > OVERLAP_TRUE_AT_S,
+        "speaker_overlap_present": spec.actual_overlap_s > OVERLAP_TRUE_AT_S,
         "long_silence_present": spec.silence_s >= SILENCE_TRUE_AT_S,
         "confidence": 0.82,
     }
@@ -158,18 +166,73 @@ def mix_noise(speech: np.ndarray, noise: np.ndarray, snr_db: float,
     return speech + noise * (target_noise_level / _rms(noise))
 
 
+def _voiced_mask(x: np.ndarray, frame: int = 512, hop: int = 256) -> np.ndarray:
+    """Cheap energy VAD, local to the generator so it has no import cycle."""
+    if x.size < frame:
+        return np.zeros(0, dtype=bool)
+    count = 1 + (x.size - frame) // hop
+    idx = np.arange(frame)[None, :] + hop * np.arange(count)[:, None]
+    rms_db = 20 * np.log10(np.sqrt((x[idx] ** 2).mean(axis=1)) + 1e-12)
+    floor, speech = np.percentile(rms_db, 5), np.percentile(rms_db, 90)
+    return rms_db > floor + 0.45 * (speech - floor)
+
+
 def inject_overlap(speech: np.ndarray, other: np.ndarray, overlap_s: float,
-                   rng: np.random.Generator) -> np.ndarray:
-    """Sum a second talker over part of the clip, as a mono mix would."""
+                   rng: np.random.Generator, hop: int = 256
+                   ) -> tuple[np.ndarray, float]:
+    """Sum a second talker over part of the clip, as a mono mix would.
+
+    Returns ``(mixed, actual_overlap_s)`` where ``actual_overlap_s`` is the time
+    both talkers are genuinely voiced at once.
+
+    **Why this returns a measured duration rather than trusting the request.**
+    The first version placed the interrupter at a uniformly random offset and
+    labelled the clip from the *requested* duration. The concatenated bases are
+    only ~42% voiced, so the interrupter usually landed in a gap and overlapped
+    nothing: measured against a 4 s request the real two-voice time had a median
+    of **0.46 s**, and only 42% of draws cleared the 0.5 s threshold the label
+    was asserting. For a 1.5 s request only 8% did.
+
+    The consequence was that most clips labelled ``speaker_overlap_present=True``
+    contained no meaningful overlap, so every overlap detector was being scored
+    against noise - which is why the hand-built dual-pitch cue correlated 0.069
+    with "injected" duration and the field was written off as unsolved. This is
+    the same class of defect as the ``mix_noise`` percentile bug already recorded
+    in the validation report: **the generator was writing wrong labels.**
+
+    Two changes fix it: the interrupter is placed on the most voiced stretch
+    available, and the label comes from measuring the result rather than from the
+    request.
+    """
     if overlap_s <= 0 or other.size == 0:
-        return speech
+        return speech, 0.0
     n_overlap = min(int(overlap_s * SR), speech.size)
     seg = _fit_length(other, n_overlap, rng)
+
+    v_base = _voiced_mask(speech, hop=hop)
+    span = max(1, n_overlap // hop)
     start = int(rng.integers(0, max(1, speech.size - n_overlap)))
+    if v_base.size > span:
+        # Score every candidate placement by how much of the base is voiced
+        # there, and choose randomly among the best. Random among the best, not
+        # the single argmax, so the set keeps positional variety.
+        dens = np.convolve(v_base.astype(np.float64), np.ones(span) / span, mode="valid")
+        best = np.flatnonzero(dens >= max(dens.max() - 0.05, 0.0))
+        if best.size:
+            start = int(rng.choice(best)) * hop
+            start = min(start, max(0, speech.size - n_overlap))
+
     out = speech.copy()
     # Slightly quieter, as an interrupting party on a phone mix usually is.
     out[start:start + n_overlap] += seg * (_rms(speech) / _rms(seg)) * 0.7
-    return out
+
+    # Measure what was actually achieved: both parties voiced at the same time.
+    v_seg = _voiced_mask(seg, hop=hop)
+    f0 = start // hop
+    base_span = v_base[f0:f0 + v_seg.size]
+    n = min(base_span.size, v_seg.size)
+    actual_s = float((base_span[:n] & v_seg[:n]).sum() * hop / SR) if n else 0.0
+    return out, actual_s
 
 
 def inject_silence(speech: np.ndarray, silence_s: float,
@@ -280,8 +343,11 @@ def degrade(
     y = speech.astype(np.float64)
 
     y = inject_silence(y, spec.silence_s, rng)
+    spec.actual_overlap_s = 0.0
     if overlap_speech is not None and spec.overlap_s > 0:
-        y = inject_overlap(y, overlap_speech.astype(np.float64), spec.overlap_s, rng)
+        y, spec.actual_overlap_s = inject_overlap(
+            y, overlap_speech.astype(np.float64), spec.overlap_s, rng
+        )
     if noise is not None and np.isfinite(spec.snr_db):
         y = mix_noise(y, noise.astype(np.float64), spec.snr_db, rng)
     y = apply_quality(y, spec.quality_ops, rng)

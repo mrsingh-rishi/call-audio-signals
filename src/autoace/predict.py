@@ -21,6 +21,7 @@ from .ingest import AudioIngestError, probe
 from .path_a_gemini import analyse_single
 from .path_b_acoustic import analyse_acoustics
 from .path_c_prosody import analyse_prosody
+from .path_d_overlap import analyse_overlap
 from .schema import CallAnalysis
 
 
@@ -116,6 +117,15 @@ def analyse_file(
     except Exception as exc:  # noqa: BLE001
         result.warnings.append(f"prosody path failed: {type(exc).__name__}")
 
+    # Path D is local, free and deterministic like Path B, so it runs in
+    # LOCAL_ONLY mode too. When the ONNX model is absent it reports
+    # available=False and fusion silently keeps Path B's weaker cue.
+    overlap = None
+    try:
+        overlap = analyse_overlap(p)
+    except Exception as exc:  # noqa: BLE001
+        result.warnings.append(f"overlap path failed: {type(exc).__name__}")
+
     gemini_analysis = None
     meta: dict[str, Any] = {}
     if s.gemini_enabled:
@@ -130,7 +140,10 @@ def analyse_file(
         result.latency_s = time.perf_counter() - t0
         return result
 
-    outcome = fuse(gemini_analysis, acoustic, prosody)
+    outcome = fuse(
+        gemini_analysis, acoustic, prosody, overlap,
+        gemini_noise_source=str(meta.get("evidence", {}).get("noise_source", "") or ""),
+    )
     usage = meta.get("usage") or _EmptyUsage()
     result.analysis = outcome.analysis.to_output_dict()
     result.model = meta.get("model", "acoustic-only")
@@ -138,6 +151,13 @@ def analyse_file(
     result.disagreements = outcome.disagreements
     if acoustic is not None:
         result.acoustic_metrics = acoustic.metrics
+    if overlap is not None and overlap.available:
+        result.acoustic_metrics = {
+            **result.acoustic_metrics,
+            "overlap_seconds": overlap.overlap_seconds,
+            "overlap_fraction": overlap.overlap_fraction,
+            "longest_overlap_s": overlap.longest_overlap_s,
+        }
     result.latency_s = time.perf_counter() - t0
     result.cost_usd = usage.cost_usd(result.model)
     result.cost_per_audio_min = usage.cost_per_audio_min(pr.duration_s, result.model)

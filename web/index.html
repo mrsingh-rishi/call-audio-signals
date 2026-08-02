@@ -85,11 +85,19 @@
   <div class="card">
     <h2>1 · Upload evaluation batch</h2>
     <div class="drop" id="drop">
-      <strong>Drop a ZIP or a folder of clips here</strong><br>
+      <strong>Drop a folder or a ZIP here</strong><br>
       <span class="muted">Audio at the root plus a <span class="mono">labels.csv</span>
       manifest (<span class="mono">name</span>, <span class="mono">result_json</span>).
       .ogg / .wav / .mp3 / .m4a / .flac supported. Labels optional.</span>
-      <input type="file" id="file" multiple class="hide" webkitdirectory-disabled>
+      <div style="margin-top:12px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+        <button class="ghost" id="pickFolder" type="button">Choose folder</button>
+        <button class="ghost" id="pickFiles" type="button">Choose files or ZIP</button>
+      </div>
+      <!-- Two inputs, deliberately: a webkitdirectory input can only pick a
+           directory, so it cannot also accept a single ZIP. Both entry points are
+           needed to satisfy "upload a folder or ZIP archive". -->
+      <input type="file" id="fileDir" class="hide" webkitdirectory directory multiple>
+      <input type="file" id="file" multiple class="hide">
     </div>
     <p class="muted" style="margin:10px 0 0;font-size:12px">
       Uploaded audio is stored in a temporary directory, deleted as soon as the batch
@@ -191,17 +199,64 @@ async function boot(){
 }
 
 // --- upload
-const drop = $('#drop'), fileInput = $('#file');
+const drop = $('#drop'), fileInput = $('#file'), dirInput = $('#fileDir');
+$('#pickFolder').onclick = e => { e.stopPropagation(); dirInput.click(); };
+$('#pickFiles').onclick  = e => { e.stopPropagation(); fileInput.click(); };
 drop.onclick = () => fileInput.click();
 drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
 drop.ondragleave = () => drop.classList.remove('over');
-drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); upload(e.dataTransfer.files); };
+drop.ondrop = async e => {
+  e.preventDefault();
+  drop.classList.remove('over');
+  upload(await filesFromDrop(e.dataTransfer));
+};
 fileInput.onchange = () => upload(fileInput.files);
+dirInput.onchange  = () => upload(dirInput.files);
+
+// Dropping a FOLDER puts a directory entry in `items`; `dataTransfer.files` is
+// empty or unusable for it. The entries API is the only way to read it, so walk
+// it recursively and flatten to a plain File[]. Falls back to `.files` when the
+// API is unavailable (older browsers, or a plain multi-file drop).
+async function filesFromDrop(dt){
+  const items = dt.items ? Array.from(dt.items) : [];
+  const entries = items
+    .map(i => i.webkitGetAsEntry && i.webkitGetAsEntry())
+    .filter(Boolean);
+  if(!entries.length) return Array.from(dt.files || []);
+
+  const out = [];
+  const walk = entry => new Promise(resolve => {
+    if(entry.isFile){
+      entry.file(f => { out.push(f); resolve(); }, () => resolve());
+    } else if(entry.isDirectory){
+      const reader = entry.createReader();
+      // readEntries returns at most ~100 entries per call, so it must be
+      // drained in a loop or large batches silently truncate.
+      const drain = () => reader.readEntries(async batch => {
+        if(!batch.length) return resolve();
+        await Promise.all(batch.map(walk));
+        drain();
+      }, () => resolve());
+      drain();
+    } else resolve();
+  });
+  await Promise.all(entries.map(walk));
+  return out;
+}
 
 async function upload(files){
-  if(!files || !files.length) return;
+  files = Array.from(files || []);
+  if(!files.length) return;
+  // Ignore junk the OS or the archive adds, which would otherwise show up in
+  // pre-flight as unsupported files and alarm the reviewer.
+  const IGNORE = /^(\.|__MACOSX)|(^|\/)\.DS_Store$|^Thumbs\.db$/i;
+  files = files.filter(f => !IGNORE.test(f.name));
+  if(!files.length) return;
   const fd = new FormData();
-  for(const f of files) fd.append('files', f, f.name);
+  // Send the basename only. The server flattens to basename anyway, and a
+  // folder pick sets `name` to the bare filename while `webkitRelativePath`
+  // carries the directory prefix.
+  for(const f of files) fd.append('files', f, f.name.split('/').pop());
   drop.innerHTML = '<strong>Uploading…</strong>';
   try{
     const r = await api('/api/batches', {method:'POST', body:fd});

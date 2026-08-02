@@ -66,7 +66,7 @@ def main(argv: list[str] | None = None) -> int:
 
     predictions: dict[str, Any] = {}
     truths, preds = [], []
-    total_cost = total_audio_s = 0.0
+    total_cost = total_cost_uncached = total_audio_s = 0.0
     t_wall = time.perf_counter()
 
     for path in files:
@@ -79,6 +79,7 @@ def main(argv: list[str] | None = None) -> int:
             continue
 
         total_cost += res.cost_usd
+        total_cost_uncached += res.cost_uncached_usd or res.cost_usd
         total_audio_s += res.duration_s
         out = res.analysis
         predictions[path.name] = out
@@ -127,9 +128,18 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{'=' * 78}")
     print(f"wrote {args.out}")
     if total_audio_s:
-        print(f"\nCOST: ${total_cost:.6f} over {total_audio_s / 60:.2f} audio-min "
-              f"= ${total_cost / (total_audio_s / 60):.6f}/audio-min "
-              f"(ceiling ${COST_CEILING_PER_AUDIO_MIN})")
+        minutes = total_audio_s / 60
+        # The UNCACHED figure is the headline. Implicit caching is opportunistic -
+        # re-running the same three clips caches the audio itself and makes a
+        # benchmark look several times cheaper than a production run over distinct
+        # files. Quoting the cache-assisted number would overstate the margin.
+        print(f"\nCOST (uncached, quote this): ${total_cost_uncached:.6f} over "
+              f"{minutes:.2f} audio-min = "
+              f"${total_cost_uncached / minutes:.6f}/audio-min "
+              f"(ceiling ${COST_CEILING_PER_AUDIO_MIN}, "
+              f"{COST_CEILING_PER_AUDIO_MIN / (total_cost_uncached / minutes):.1f}x headroom)")
+        print(f"COST (as billed this run, cache-assisted): ${total_cost:.6f} "
+              f"= ${total_cost / minutes:.6f}/audio-min")
         print(f"LATENCY: {wall:.1f}s wall for {total_audio_s / 60:.2f} audio-min "
               f"= {wall / (total_audio_s / 60):.1f}s per audio-min")
 

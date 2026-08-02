@@ -6,12 +6,34 @@ AutoAce-controlled infrastructure."*
 
 ---
 
+## Third-party models and their licences
+
+Licence is a hard filter here, not a footnote: this is a trial for a commercial
+product, so a research-only checkpoint is unusable however good it is.
+
+| Component | What it is | Licence | Runs where | Data leaves? |
+|---|---|---|---|---|
+| **Path A** — Gemini | audio LLM, see below | commercial API | Google | **yes** |
+| **Path B** — acoustic DSP | numpy + ffmpeg, no weights | n/a | in-container | no |
+| **Path C** — prosody classifier | 26 features + logistic regression, coefficients fitted by us | ours | in-container | no |
+| **Path D** — `pyannote/segmentation-3.0` | overlapped-speech detection, ONNX, 5.7 MB | **MIT** (© 2022 CNRS) | in-container | no |
+
+Path D's weights are baked into the image at build time from the k2-fsa ONNX
+export, so nothing is fetched at boot and no Hugging Face token is needed. Only
+Path A sends data anywhere.
+
+**Models deliberately rejected on licence grounds**, recorded because the choice
+cost measurable accuracy: audEERING `wav2vec2-large-robust-...-msp-dim` is the
+de-facto standard for dimensional speech emotion but is CC-BY-NC-SA-4.0, and
+`emotion2vec+ large` is restricted by its training data. Both are fine for a
+demo and not for the product this is a trial for. See `RESEARCH.md` §4.
+
 ## External API in use
 
 | | |
 |---|---|
 | **Provider** | Google — Gemini Developer API (`generativelanguage.googleapis.com`) |
-| **Model** | `gemini-2.5-flash-lite` (configurable; fallback `gemini-3.1-flash-lite`) |
+| **Model** | `gemini-2.5-flash-lite` (set by `GEMINI_MODEL`; `gemini-3.1-flash-lite` is the forward path once 2.5 retires) |
 | **Tier** | **Paid.** Required — see below |
 | **SDK** | `google-genai` |
 | **What is sent** | The audio file bytes, plus a text system instruction. No customer identifiers, no account data, no metadata beyond the audio itself |
@@ -37,10 +59,13 @@ below, and it must be an explicit, informed choice.
 **A zero-egress mode exists.** Setting `LOCAL_ONLY=true` disables the Gemini path
 entirely. In that mode no audio leaves the container.
 
-> Note: as currently built, `LOCAL_ONLY=true` means *no analysis is produced* — the
-> deterministic local path (Path B) is designed but not yet implemented. Until it is,
-> `LOCAL_ONLY` is a hard privacy switch, not an alternative analysis mode. Stated plainly
-> rather than implied.
+`LOCAL_ONLY=true` is a genuine alternative analysis mode, not merely a kill switch. The
+deterministic acoustic path (Path B), the prosodic classifier (Path C) and the speaker-
+overlap model (Path D) all run locally with no network access and nothing to download at
+runtime, so the mode still produces all nine fields:
+tone, intensity, noise presence/type/severity, quality, overlap and silence. What it loses
+is Gemini's semantic customer identification and its naming of the noise source — Path B
+falls back to naming the noise from its spectral character instead.
 
 ## Retention
 
@@ -66,14 +91,17 @@ Rates verified 2026-08-01, USD per 1M tokens:
 | `gemini-2.5-flash-lite` | 0.30 | 0.40 |
 | `gemini-3.1-flash-lite` | 0.50 | 1.50 |
 
-**Measured end-to-end cost: $0.000831 per audio-minute** across 3.96 audio-minutes —
-approximately **3.6× under the $0.003 ceiling**. Cost is computed from live
+**Measured end-to-end cost: $0.000875 per audio-minute** across 3.96 audio-minutes —
+**3.4× under the $0.003 ceiling**. Cost is computed from live
 `usageMetadata`, not estimated, and thinking tokens are billed at output rates explicitly
 because an unbounded thinking budget is the usual way a per-minute ceiling gets breached
 silently.
 
-`gemini-2.5-flash-lite` retires **2026-10-16**. The model ID is configuration, not code,
-and `gemini-3.1-flash-lite` is wired as the forward path.
+`gemini-2.5-flash-lite` retires **2026-10-16**. The model ID is configuration, not code:
+migrating is a `GEMINI_MODEL` environment-variable change with no redeploy of source, and
+`gemini-3.1-flash-lite` pricing is already in the table in `config.py` so the cost model
+stays accurate across the switch. There is no automatic runtime failover between models —
+the migration is a deliberate operator action, not something the service does silently.
 
 ## Secrets
 

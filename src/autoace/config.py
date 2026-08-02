@@ -88,7 +88,6 @@ BATCH_DISCOUNT = 0.5
 class Settings:
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash-lite"
-    gemini_model_fallback: str = "gemini-3.1-flash-lite"
     gemini_thinking_budget: int = 0
 
     local_only: bool = False
@@ -101,9 +100,11 @@ class Settings:
     max_concurrency: int = 4
     database_url: str = "sqlite:///./autoace.db"
 
-    # Long-call handling. Clips at or below the threshold are scored whole;
-    # longer clips are windowed with a COMPACT per-window schema, because
-    # evidence strings per window erode the cost headroom (plan 7.1).
+    # RESERVED, not yet read by any code path. Long-call windowing is designed
+    # but deliberately unshipped: cost per audio-minute is flat in duration, so
+    # windowing buys nothing at the clip lengths seen so far. Kept here as the
+    # documented parameters for that work rather than deleted, because the memo's
+    # limitations section refers to them.
     window_threshold_s: float = 90.0
     window_length_s: float = 60.0
     window_overlap_s: float = 5.0
@@ -125,9 +126,6 @@ def get_settings() -> Settings:
     return Settings(
         gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
         gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite").strip(),
-        gemini_model_fallback=os.getenv(
-            "GEMINI_MODEL_FALLBACK", "gemini-3.1-flash-lite"
-        ).strip(),
         gemini_thinking_budget=int(_num("GEMINI_THINKING_BUDGET", 0)),
         local_only=_flag("LOCAL_ONLY", False),
         upload_retention_hours=_num("UPLOAD_RETENTION_HOURS", 24.0),
@@ -150,7 +148,6 @@ def redacted_summary() -> dict[str, object]:
         "gemini_api_key_present": bool(s.gemini_api_key),
         "gemini_enabled": s.gemini_enabled,
         "gemini_model": s.gemini_model,
-        "gemini_model_fallback": s.gemini_model_fallback,
         "gemini_thinking_budget": s.gemini_thinking_budget,
         "local_only": s.local_only,
         "upload_retention_hours": s.upload_retention_hours,

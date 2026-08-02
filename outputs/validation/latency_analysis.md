@@ -94,12 +94,21 @@ after 15 minutes of inactivity.
 
 **This is a submission risk, not a technical one.** The brief requires the
 deployment to "remain available through the evaluation period", and a reviewer
-clicking a cold link waits half a minute. The fix is one line — `plan: free` →
-`plan: starter` in `render.yaml`, $7/month — and it requires a payment method on
+clicking a cold link waits half a minute.
+
+**Mitigation in place: an external keep-alive** pings `/api/health` every 10
+minutes, inside Render's 15-minute idle window, so the instance never spins down
+during the evaluation period. `/api/health` is unauthenticated and does no work
+beyond returning a status object, so the ping costs nothing.
+
+This fixes cold start but **not** the per-clip latency: the free plan still
+allocates 0.1 CPU, and Paths B, C and D are CPU-bound. The complete fix remains
+one line — `plan: free` → `plan: starter` in `render.yaml`, $7/month — which
+raises the allocation from **0.1 to 0.5 CPU**. It requires a payment method on
 the Render account, which the API rejected with HTTP 402 at deploy time.
 
-Starter also raises the CPU allocation from **0.1 to 0.5 CPU**, which addresses
-the per-clip latency above at the same time.
+The keep-alive is a workaround and is described as one rather than presented as
+a fix.
 
 Container memory **was** the binding constraint and is now controlled. The
 deployed service was OOM-killed at the 512 MiB limit while processing the
@@ -108,6 +117,27 @@ deriving all acoustic features from a single pass instead of decoding the clip
 three times, float32 frame matrices, and batching the F0 FFT — brought that to
 **286 MB**, and chunked extraction now bounds memory by chunk rather than by clip
 length, which is what makes a 45-minute recording survivable.
+
+**Adding Path D put that headroom back at risk, so it was measured rather than
+assumed.** Peak RSS on the same 172-second clip, all paths in one process:
+
+| stage | peak RSS |
+|---|---|
+| baseline | 29 MB |
+| + Path B (acoustic) | 129 MB |
+| + Path C (prosody) | 302 MB |
+| + Path D, as first written | **447 MB** |
+| + Path D, after the fixes below | **332 MB** |
+
+447 MB against a 536.9 MB limit at `MAX_CONCURRENCY=2` was not survivable. Two
+changes brought Path D's own footprint from ~144 MB to ~31 MB, with **identical
+outputs**: disabling onnxruntime's CPU memory arena (it caches freed blocks
+rather than returning them, and the clip is fed in bounded chunks anyway, so
+there is no churn for it to amortise), and batching inference eight windows at a
+time so peak activation memory is bounded by batch rather than by clip length.
+
+One `InferenceSession` is shared process-wide — `run()` is thread-safe — so
+concurrency multiplies the per-file arrays but not the model.
 
 The architecture avoiding the 660 MB–1.1 GB speech-emotion models is what leaves
 any headroom at all; the fitted classifiers ship as **16 KB of JSON**.

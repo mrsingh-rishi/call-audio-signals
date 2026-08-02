@@ -252,6 +252,10 @@ def build(n_clips: int, seed: int = 20260801, adversarial_frac: float = 0.35) ->
             "source_corpus": base.source, "adversarial_cell": cell,
             "format_chain": fmt, "snr_db": ("inf" if not np.isfinite(snr) else snr),
             "quality_ops": "|".join(quality_ops), "overlap_s": overlap_s,
+            # `overlap_s` is what was REQUESTED; `actual_overlap_s` is the
+            # two-voice time actually achieved and is what the label derives
+            # from. Both are recorded so the gap stays auditable.
+            "actual_overlap_s": round(spec.actual_overlap_s, 3),
             "silence_s": silence_s, "spec": json.dumps(asdict(spec)),
             "result_json": json.dumps(gt),
         })

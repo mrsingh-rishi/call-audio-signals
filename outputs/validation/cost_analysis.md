@@ -9,11 +9,13 @@ the API, not from an estimate. Reproduce with `uv run python scripts/predict_pro
 
 | | |
 |---|---|
-| **Measured cost** | **$0.000849 per audio-minute** |
+| **Measured cost** | **$0.000875 per audio-minute** |
 | Ceiling | $0.003 per audio-minute |
-| **Headroom** | **3.5×** |
+| **Headroom** | **3.4×** |
 
-Measured across the three provided calls (3.96 audio-minutes total, $0.003366).
+Measured across the three provided calls (3.96 audio-minutes total, $0.003469
+uncached). The per-clip breakdown in §2 is from an earlier cache-hitting run and is
+kept because it is what demonstrates the caching effect.
 
 ---
 
@@ -40,7 +42,7 @@ cached number would have overstated the margin by 3.5×.
 | call_001 | $0.000224 | $0.000657 | 1,603 / 1,898 |
 | call_002 | $0.000251 | $0.000697 | 1,653 / 2,026 |
 | call_003 | $0.000490 | $0.002013 | 5,639 / 6,409 |
-| **per audio-min** | $0.000243 | **$0.000849** | |
+| **per audio-min** | $0.000243 | **$0.000875** | |
 
 ---
 
@@ -57,7 +59,11 @@ cached number would have overstated the margin by 3.5×.
 4. **Thinking disabled** (`thinking_budget=0`). Thinking tokens bill at *output*
    rates and are the usual way a per-minute ceiling is breached silently; they
    are logged separately and counted in the cost function.
-5. **Paths B and C cost $0** — pure numpy/ffmpeg, no API, no model weights.
+5. **Paths B, C and D cost $0 in inference** — no API call, no metered service.
+   Paths B and C are pure numpy/ffmpeg with no weights at all; Path D runs a
+   5.7 MB ONNX model on the container's own CPU. Their real cost is CPU time,
+   which is already paid for in the $7/month hosting line below and does not
+   scale with volume the way a per-token API does.
 6. Output is ~220 tokens/clip measured, against a 350-token budget used for
    planning.
 
@@ -79,8 +85,8 @@ The cost model ruled it out on the forward-path model:
 Three heads fit *today* on 2.5-flash-lite, which **retires 2026-10-16**, and
 breach on its successor at interactive latency. Rather than build an architecture
 with a known expiry date, field independence was moved out of the LLM entirely:
-Paths B and C are structurally incapable of conflating fields because they never
-see transcript or emotion. That is stronger than a prompt instruction and it is
+Paths B, C and D are structurally incapable of conflating fields because they
+never see a transcript or an emotion label. That is stronger than a prompt instruction and it is
 free.
 
 ## 5. Context caching — measured, not assumed
@@ -104,14 +110,14 @@ call lengths. It is measured per call and reported, never assumed.
 |---|---|
 | Gemini (uncached, interactive) | **$50.94** |
 | Gemini via Batch API (−50%) | $25.47 |
-| Paths B + C | $0.00 |
+| Paths B + C + D | $0.00 |
 | Hosting (Render starter) | $7.00 |
 | **Total, interactive** | **≈ $58/month** |
 
 For comparison the ceiling permits $180/month at that volume.
 
-**`LOCAL_ONLY=true` runs Paths B and C alone at $0 marginal inference cost** with
-zero data egress. It loses `emotional_tone` quality — which is Path C, so
-actually it does not: the local mode retains tone, intensity, noise, quality,
-overlap and silence. It loses only Gemini's semantic customer identification and
-its noise *naming*.
+**`LOCAL_ONLY=true` runs Paths B, C and D at $0 marginal inference cost** with zero
+data egress, and still produces all nine fields: tone, intensity, noise presence,
+severity, quality, overlap and silence. It loses exactly two things — Gemini's
+semantic customer identification, and its *naming* of the noise source, which
+falls back to Path B's spectral guess.
