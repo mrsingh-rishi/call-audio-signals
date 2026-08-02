@@ -345,6 +345,19 @@ posterior tracks the realised accuracy closely in each bin — under-confident a
 the top, which is the safe direction. A signal that did *not* track correctness
 would be decoration and would not have been shipped.
 
+**Two invariants are enforced rather than calibrated.** The magnitudes here are
+uncalibrated — only the direction is claimed:
+
+1. Confidence must not *rise* as information falls. `LOCAL_ONLY` has no semantic
+   path, so no disagreement with Path A can ever be detected; without an explicit
+   correction it reported **higher** confidence than the full system purely
+   because it had less to argue with (0.59 vs 0.57 on call_001). It now sits
+   modestly below.
+2. A path that was never meant to run is not a failure. The penalty applies to
+   paths that were expected and are missing, not to Path A being switched off by
+   configuration — the previous rule flattened `LOCAL_ONLY` to 0.28–0.35 across
+   the board, which read as a broken deployment rather than a deliberate one.
+
 **It is deliberately not calibrated against the provided labels**, because those
 labels carry a constant `0.82` on all three calls — and `0.82` is also the value
 in the brief's own example output. It is a copied placeholder, not ground truth.

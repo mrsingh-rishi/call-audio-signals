@@ -87,6 +87,48 @@ It is also simply blind on some fields: `speaker_overlap_present` returned
 asking about interruptions. On one clip it wrote *"a faint hiss throughout the
 recording"* in its evidence and then set `background_noise_present: false`.
 
+#### Does Path A still earn its place? An ablation, because the brief says it need not
+
+§4 of the brief says an LLM is *not required*, and that a deterministic method
+"may be preferable if it improves cost, latency, or reliability." After Path D
+took over `speaker_overlap_present`, Path A had authority over **no field
+outright**, so that question needed an answer with a number rather than an
+opinion. `LOCAL_ONLY=true` runs the identical pipeline minus Path A:
+
+| | with Path A | LOCAL_ONLY |
+|---|---|---|
+| fields exact (n=3, 24 scored) | **15/24** | 14/24 |
+| cost | $0.000875/audio-min | **$0.00** |
+| latency, deployed | 15.7 s/clip | **~1.8 s/clip** |
+| audio leaves AutoAce infra | **yes** | **no** |
+| external dependency | API, rate limits, `2.5-flash-lite` retires 2026-10-16 | none |
+
+**Across all three calls and all eight fields, removing Path A changes exactly
+one value:** `long_silence_present` on call_003, where its veto is right and
+Path B alone is wrong.
+
+Two things it was *supposed* to do and did not: it reported **"nothing audible"**
+on all three clips, including call_002 (truth `TV`) and call_003 (truth
+`sharp static`), so the noise *naming* it was retained for contributed nothing —
+the `line noise` in the output comes from Path B's spectral fallback.
+
+**It is kept anyway, and here is the honest reasoning.** "One field in 24" is the
+wrong denominator; the right one is *the field that requires a semantic
+judgement*, and there it corrected an error on 1 of 3 real calls. The brief
+scopes `long_silence_present` to silence "that may indicate a call-flow or audio
+problem" — and real dealership calls are full of ordinary long pauses for holds,
+lookups and transfers. Path B flags every one of them. The proxy set cannot test
+this at all, because it injects digital silence rather than normal pauses, so
+n=3 real calls is the only evidence there is.
+
+Hidden-set accuracy is 45% of the evaluation and cost plus practicality are 25%,
+and **both configurations clear the cost ceiling** — so the deciding question is
+which generalises to real audio, not which is cheaper. That argues for keeping
+the one component that can make a judgement the others structurally cannot.
+
+**If that reasoning is wrong, the fix is one environment variable.**
+`LOCAL_ONLY=true` is a supported, tested deployment mode, not a kill switch.
+
 ### Path B — deterministic acoustic analysis
 
 numpy + ffmpeg, no model weights. Noise estimated by **minimum statistics**

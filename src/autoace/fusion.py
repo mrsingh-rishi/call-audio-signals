@@ -193,8 +193,17 @@ def fuse(
     # brief's own example output, so it is a copied placeholder. Fitting a
     # calibrator to a constant would produce a constant. Calibration against the
     # proxy eval split is reported in the validation report.
-    base = float(gemini.confidence) if gemini is not None else 0.4
     probs = getattr(prosody, "tone_probs", None) if prosody is not None else None
+    if gemini is not None:
+        base = float(gemini.confidence)
+    elif probs:
+        # LOCAL_ONLY is a deliberate zero-egress deployment, not a degraded run.
+        # Paths B, C and D all produce their normal output, so the starting point
+        # is the prosody posterior rather than the 0.4 "we know almost nothing"
+        # floor that applied when Path B was the only local path in existence.
+        base = 0.62
+    else:
+        base = 0.4
     if probs:
         top = max(float(v) for v in probs.values())
         # Blend rather than replace: the posterior of a 5-class model rarely
@@ -206,8 +215,25 @@ def fuse(
     else:
         sources["confidence"] = "fused(agreement-weighted)"
     conf = base - 0.08 * len(disagreements)
-    if gemini is None or acoustic is None:
-        conf -= 0.15                      # only one path ran
+
+    # Penalise MISSING paths, not the absence of Gemini specifically. The old rule
+    # subtracted 0.15 whenever Gemini was absent, which meant LOCAL_ONLY - where
+    # three of the four paths run normally - reported 0.28-0.35 across the board
+    # and looked broken. A path that was never meant to run is not a failure; a
+    # path that was meant to run and did not is.
+    ran = sum(x is not None for x in (acoustic, prosody))
+    ran += 1 if (overlap is not None and getattr(overlap, "available", False)) else 0
+    if ran < 3:
+        conf -= 0.08 * (3 - ran)
+
+    # Without Path A there is no semantic cross-check, so no disagreement with it
+    # can ever be detected - which would otherwise leave LOCAL_ONLY reporting
+    # HIGHER confidence than the full system purely because it has less to argue
+    # with. Confidence must not rise as information falls. Like the rest of this
+    # score the size is uncalibrated (see the validation report); only the
+    # direction is claimed.
+    if gemini is None:
+        conf -= 0.05
     out["confidence"] = round(max(0.05, min(0.99, conf)), 2)
 
     analysis, repairs = coerce_to_schema(out)
